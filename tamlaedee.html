@@ -205,6 +205,18 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
 .pay ol{margin:0;padding-left:18px;display:grid;gap:6px}
 .qr svg{display:block;width:150px;height:150px;background:#fff;border-radius:8px;border:1px solid var(--line)}
 @media (max-width:460px){.pay{grid-template-columns:1fr}.qr{justify-self:center}}
+#busy{position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:2500;width:min(92vw,400px);display:flex;gap:14px;align-items:center;background:var(--surface);color:var(--ink);border:2px solid var(--pinA);border-radius:14px;padding:12px 16px;box-shadow:0 8px 28px rgb(0 0 0/.28);pointer-events:none}
+#busy b{font-size:15px}#busy .big{display:block}#busy .big b{font-size:26px;font-variant-numeric:tabular-nums;color:var(--pinA)}#busy small{display:block;color:var(--muted);font-size:12px}
+.spin{flex:none;width:30px;height:30px;border-radius:50%;border:4px solid color-mix(in srgb,var(--pinA) 25%,transparent);border-top-color:var(--pinA);animation:tlspin .9s linear infinite}
+@keyframes tlspin{to{transform:rotate(360deg)}}
+.rseg{flex-wrap:wrap;max-width:100%}.m-chips .rseg{flex-wrap:nowrap;overflow-x:auto;max-width:92vw}
+.plans{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0 10px}
+.plancard{display:grid;gap:2px;text-align:left;border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:10px 12px}
+.plancard[aria-pressed="true"]{border-color:var(--pinA);background:color-mix(in srgb,var(--pinA) 8%,var(--surface))}
+.plancard .num{font-size:20px;font-weight:700;color:var(--pinA)}.plancard small{color:var(--muted);font-size:11.5px}
+.paybtn{display:block;text-align:center;text-decoration:none;margin:6px 0}
+.deep{display:grid;gap:10px}.dp h5{margin:0 0 4px;font:600 13px var(--f-body)}.dp ul{margin:0;padding-left:18px;display:grid;gap:3px;font-size:13px}
+.ent.warn b{font-weight:700}
 
 /* printable report */
 #report{display:none}
@@ -262,10 +274,14 @@ const CONFIG = {
   PUBLIC_KEY: /*PUBLIC_KEY*/{"kty":"EC","crv":"P-256","x":"0-1pqcZF_4IAwrk4gTwe8xfY_C3IX9xY5P0TeYyHiSE","y":"WLXbS0fVN2yioXHbeilr8ipv-T885iHfojMjP7eRt3U"}/*END_PUBLIC_KEY*/,
   CONTACT: /*CONTACT*/'LINE @097wgyfr'/*END_CONTACT*/,
   LINE_URL: /*LINE_URL*/'https://line.me/R/ti/p/@097wgyfr'/*END_LINE_URL*/,
-  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ฟรี 7 วัน'/*END_PRICES*/,
-  PRICE: 690, // baht per month, put into the PromptPay QR
+  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ 7 วัน 69 บาท'/*END_PRICES*/,
+  PLANS: { trial: { name: 'ทดลองใช้ 7 วัน', price: 69, days: 7 }, month: { name: 'PRO รายเดือน', price: 690, days: 30 } },
+  // Hosted card-payment links (Stripe / gateway). Success redirect must be: <app url>?paid=trial&k=<token> (see payment-setup-th.md). Empty = card not open yet, PromptPay QR is shown instead.
+  PAY_URL: { trial: '', month: '' },
+  // SHA-256 of the secret tokens in those redirect URLs; the app unlocks only when the returned token matches
+  PAY_HASH: { trial: ['0f9e26bb85510c383e4df31e6e40505a53b6337a5360dd6b99656e230e4b4dde'], month: ['93e64fde395d2d55b3bcf33546e63a719a4dcdeb6ef5c86a2d5ce408ffd7ff63'] },
   PROMPTPAY: /*PROMPTPAY*/'0857983066'/*END_PROMPTPAY*/, // owner's PromptPay phone number (10 digits) or tax ID; empty = payment not open yet
-  TRIAL_DAYS: 7,
+  MAX_RADIUS: 5000,
   REWARD: true, // thank contributors of real outcomes with extra PRO days
 };
 
@@ -277,7 +293,7 @@ const DAY = 864e5;
 const fmtDate = (ms) => new Date(ms).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* storage blocked: asked again next time */ } };
-const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1', installDismissed: 'tl-install-dismissed-v1', paid: 'tl-paid-until-v1', device: 'tl-device-v1' };
+const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1', installDismissed: 'tl-install-dismissed-v1', paid: 'tl-paid-until-v1', device: 'tl-device-v1', card: 'tl-card-until-v1', plan: 'tl-card-plan-v1', trialUsed: 'tl-trial-used-v1', promo: 'tl-promo-day-v1' };
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 let deferredInstall = null; // Android Chrome's one-tap install prompt, when it offers one
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
@@ -355,16 +371,39 @@ async function fetchActivation() {
 }
 
 async function initEnt() {
-  let start = lsGet(LSK.trial);
-  if (!start || isNaN(Date.parse(start))) { start = new Date().toISOString().slice(0, 10); lsSet(LSK.trial, start); }
-  const left = Math.ceil((Date.parse(start) + CONFIG.TRIAL_DAYS * DAY - Date.now()) / DAY);
   const lic = await verifyLicense(lsGet(LSK.lic));
   const paidUntil = await fetchActivation();
-  if (lic && Date.now() <= lic.expMs) ENT = { active: true, kind: 'paid', until: lic.expMs, id: lic.id };
-  else if (paidUntil && Date.now() <= paidUntil) ENT = { active: true, kind: 'paid', until: paidUntil };
-  else if (left > 0) ENT = { active: true, kind: 'trial', daysLeft: Math.min(left, CONFIG.TRIAL_DAYS) };
-  else ENT = { active: false, kind: (lic || paidUntil) ? 'expired' : 'ended' };
+  const card = Number(lsGet(LSK.card)) || 0; // set when a card payment returns to the app
+  const best = Math.max(lic ? lic.expMs : 0, paidUntil || 0, card);
+  if (best && Date.now() <= best) ENT = { active: true, kind: 'paid', until: best, plan: card === best ? lsGet(LSK.plan) : '' };
+  else ENT = { active: false, kind: best ? 'expired' : 'free' };
   renderAll();
+  setTimeout(maybePromo, 1500);
+}
+const trialEligible = () => !lsGet(LSK.trialUsed) && ENT.kind === 'free';
+const sha256Hex = async (s) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), (b) => b.toString(16).padStart(2, '0')).join('');
+// Hosted card page sends the customer back to ?paid=<plan>&k=<secret>; a matching secret unlocks PRO at once, no approval.
+async function handlePaidReturn() {
+  const sp = new URLSearchParams(location.search), plan = sp.get('paid'), k = sp.get('k');
+  if (!plan) return;
+  history.replaceState(null, '', location.pathname);
+  const P = CONFIG.PLANS[plan];
+  if (!P || !k || !(self.crypto && crypto.subtle) || !(CONFIG.PAY_HASH[plan] || []).includes(await sha256Hex(k))) { toast('ตรวจการชำระเงินไม่สำเร็จ หากตัดบัตรแล้วโปรดแจ้งทีมงาน', 9000); return; }
+  if (plan === 'trial' && lsGet(LSK.trialUsed)) { toast('เครื่องนี้ใช้สิทธิ์ทดลอง 7 วันไปแล้ว เลือกแพ็กเกจรายเดือนได้เลย', 9000); return; }
+  const base = Math.max(Date.now(), Number(lsGet(LSK.card)) || 0), d = new Date(base + P.days * DAY);
+  const until = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+  lsSet(LSK.card, String(until)); lsSet(LSK.plan, plan);
+  if (plan === 'trial') lsSet(LSK.trialUsed, '1');
+  closeDlg(); await initEnt();
+  toast(`ชำระเงินสำเร็จ ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(until)}`, 8000);
+}
+// friendly nudge for free users: once a day, right after they have seen a result
+function maybePromo() {
+  if (ENT.active || ENT.kind === 'loading' || $('.dlg-bg')) return;
+  const today = new Date().toDateString();
+  if (lsGet(LSK.promo) === today || entry(S.active).state !== 'ok') return;
+  lsSet(LSK.promo, today);
+  openDlg('promo');
 }
 
 async function activate(raw) {
@@ -390,17 +429,16 @@ async function handleUnlockLink() {
   toast(r.ok ? `ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(r.until)}` : r.error, r.ok ? 6000 : 9000);
 }
 
-const entLabel = () => (ENT.kind === 'paid' ? `PRO ถึง ${fmtDate(ENT.until)}` : ENT.kind === 'trial' ? `ทดลอง PRO เหลือ ${ENT.daysLeft} วัน` : 'ปลดล็อก PRO');
+const entLabel = () => (ENT.kind === 'paid' ? `PRO ถึง ${fmtDate(ENT.until)}` : ENT.kind === 'expired' ? 'ต่ออายุ PRO' : 'ลอง PRO 69 บาท');
 function entBanner() {
   if (ENT.kind === 'paid') return `<div class="ent"><span><span class="badge">PRO</span> ใช้งานได้ถึง ${fmtDate(ENT.until)}</span><button data-act="dlg" data-v="license">จัดการ</button></div>`;
-  if (ENT.kind === 'trial') return `<div class="ent"><span><span class="badge">PRO</span> ทดลองใช้ฟรีเหลือ ${ENT.daysLeft} วัน · ฟังก์ชันพื้นฐานใช้ฟรีตลอด</span><button data-act="dlg" data-v="license">รายละเอียด</button></div>`;
   if (ENT.kind === 'loading') return '';
-  return `<div class="ent warn"><span>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO'} · ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</span><button data-act="dlg" data-v="license">ปลดล็อก PRO</button></div>`;
+  return `<div class="ent warn"><span>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว · ' : ''}ใช้ฟรีตลอด · อยากได้ข้อมูลเชิงลึก? <b>PRO 690 บาท/เดือน</b>${trialEligible() ? ' หรือ <b>ลองใช้ 7 วัน 69 บาท</b>' : ''}</span><button data-act="plan-open" data-v="${trialEligible() ? 'trial' : 'month'}">ดูรายละเอียด</button></div>`;
 }
 
 /* ---------- business types ---------- */
 const GEN_SIZE = { office: 1.5, uni: 4, school: 2, condo: 2, dorm: 1.5, mall: 4, hospital: 3, station: 3 };
-const TYPE_TH = { office: 'สำนักงาน', uni: 'มหาวิทยาลัย', school: 'โรงเรียน', condo: 'คอนโด/อพาร์ตเมนต์', dorm: 'หอพัก', mall: 'ห้าง', hospital: 'โรงพยาบาล', station: 'สถานีรถไฟฟ้า/รถไฟ', coworking: 'Co-working', gym: 'ฟิตเนส', bookstore: 'ร้านหนังสือ', convenience: 'ร้านสะดวกซื้อ', market: 'ตลาด', clinic: 'คลินิก', cafe: 'คาเฟ่', food: 'ร้านอาหาร', grocery: 'ร้านของชำ', pharmacy: 'ร้านขายยา', laundry: 'ร้านซักผ้า', barber: 'ร้านตัดผม', carwash: 'คาร์แคร์' };
+const TYPE_TH = { office: 'สำนักงาน', uni: 'มหาวิทยาลัย', school: 'โรงเรียน', condo: 'คอนโด/อพาร์ตเมนต์', dorm: 'หอพัก', mall: 'ห้าง', hospital: 'โรงพยาบาล', station: 'สถานีรถไฟฟ้า/รถไฟ', coworking: 'Co-working', gym: 'ฟิตเนส', bookstore: 'ร้านหนังสือ', convenience: 'ร้านสะดวกซื้อ', market: 'ตลาด', clinic: 'คลินิก', cafe: 'คาเฟ่', food: 'ร้านอาหาร', grocery: 'ร้านของชำ', pharmacy: 'ร้านขายยา', laundry: 'ร้านซักผ้า', barber: 'ร้านตัดผม', carwash: 'คาร์แคร์', housing: 'โครงการบ้าน/หมู่บ้าน' };
 const BIZ = {
   cafe: { label: 'คาเฟ่ / ร้านกาแฟ', short: 'คาเฟ่', w: { office: 1, uni: .9, school: .2, condo: .6, dorm: .5, mall: .6, hospital: .4, station: 1 }, cmpl: ['coworking', 'gym', 'bookstore'], tip: 'มุมนั่งทำงาน ปลั๊กไฟ และที่นั่งช่วงเที่ยงมักเป็นจุดที่ลูกค้าเทียบกัน' },
   food: { label: 'ร้านอาหาร / ตามสั่ง', short: 'ร้านอาหาร', w: { office: 1, uni: .7, school: .5, condo: .8, dorm: .7, mall: .4, hospital: .6, station: .8 }, cmpl: ['market', 'convenience'], tip: 'ความเร็วช่วงพักเที่ยงและที่จอดรถมักเป็นจุดตัดสินใจของลูกค้า' },
@@ -409,9 +447,14 @@ const BIZ = {
   laundry: { label: 'ร้านซักผ้าหยอดเหรียญ', short: 'ร้านซักผ้า', w: { office: .05, uni: .4, school: 0, condo: 1, dorm: 1.3, mall: 0, hospital: .1, station: .2 }, cmpl: ['convenience', 'market'], tip: 'จำนวนเครื่องช่วงเย็นวันหยุดและการจองคิวผ่านแอพคือจุดที่ลูกค้าเทียบกัน' },
   barber: { label: 'ร้านตัดผม / เสริมสวย', short: 'ร้านตัดผม', w: { office: .7, uni: .8, school: .3, condo: .9, dorm: .8, mall: .5, hospital: .1, station: .6 }, cmpl: ['gym', 'convenience'], tip: 'การจองคิวออนไลน์และรูปผลงานที่ชัดเจนช่วยดึงลูกค้าใหม่' },
   carwash: { label: 'คาร์แคร์ / ล้างรถ', short: 'คาร์แคร์', access: 'road', w: { office: .6, uni: .2, school: .1, condo: .9, dorm: .1, mall: .5, hospital: .2, station: 0 }, cmpl: ['convenience', 'gym'], tip: 'ลูกค้าขับรถมา การติดถนนใหญ่และมีที่นั่งรอสำคัญกว่าระยะถึงรถไฟฟ้า' },
+  // real estate: scored with the same engine; "competitors" = similar supply nearby, "demand" = people sources that need housing
+  house: { label: 'บ้านโครงการ / หมู่บ้านจัดสรร', short: 'บ้านโครงการ', prop: true, access: 'road', comp: ['housing'], w: { office: 1, uni: .3, school: .9, condo: 0, dorm: 0, mall: .8, hospital: .6, station: .6 }, cmpl: ['market', 'convenience', 'clinic', 'gym'], tip: 'ประเมินจากแหล่งงาน โรงเรียน และความสะดวกรอบทำเล ควรตรวจน้ำท่วม ผังเมือง และเวลาเดินทางจริงช่วงเร่งด่วนเพิ่ม' },
+  land: { label: 'ที่ดิน (ซื้อเก็บ / พัฒนา)', short: 'ที่ดิน', prop: true, access: 'road', comp: ['housing', 'condo'], w: { office: .8, uni: .5, school: .6, condo: 0, dorm: 0, mall: .9, hospital: .5, station: .9 }, cmpl: ['market', 'convenience', 'clinic'], tip: 'ยิ่งมีโครงการอยู่รอบมาก แปลว่าตลาดมีอยู่จริงแต่ที่ดินเหลือน้อย ควรตรวจขนาดทางเข้า ผังสี และสาธารณูปโภคของแปลงจริง' },
+  rental: { label: 'บ้านเช่า / หอพัก', short: 'หอพัก/บ้านเช่า', prop: true, comp: ['dorm', 'condo'], w: { office: 1, uni: 1.4, school: .1, condo: 0, dorm: 0, mall: .5, hospital: .6, station: .9 }, cmpl: ['convenience', 'laundry', 'food', 'market'], tip: 'ผู้เช่าหลักคือนักศึกษาและคนทำงานรอบทำเล ลองเทียบค่าเช่าและอัตราเข้าพักของหอรอบข้างก่อนลงทุน' },
 };
-const CATS = [{ name: 'อาหารและเครื่องดื่ม', items: ['cafe', 'food'] }, { name: 'ร้านค้าปลีก', items: ['grocery', 'pharmacy'] }, { name: 'บริการ', items: ['laundry', 'barber', 'carwash'] }];
-const KEYWORDS = [[/กาแฟ|คาเฟ่|cafe|coffee/i, 'cafe'], [/อาหาร|ก๋วยเตี๋ยว|ตามสั่ง|ส้มตำ|ข้าวมัน|ข้าวแกง|restaurant/i, 'food'], [/ซักผ้า|ซักรีด|ซักอบ|laundry/i, 'laundry'], [/ร้านยา(?!ง)|ขายยา|เภสัช|pharma/i, 'pharmacy'], [/ตัดผม|เสริมสวย|ซาลอน|ทำผม|บาร์เบอร์|barber|salon/i, 'barber'], [/ล้างรถ|คาร์แคร์|car ?wash|car ?care/i, 'carwash'], [/ของชำ|โชห่วย|มินิมาร์ท|grocery/i, 'grocery']];
+const CATS = [{ name: 'อาหารและเครื่องดื่ม', items: ['cafe', 'food'] }, { name: 'ร้านค้าปลีก', items: ['grocery', 'pharmacy'] }, { name: 'บริการ', items: ['laundry', 'barber', 'carwash'] }, { name: 'อสังหาริมทรัพย์', items: ['house', 'land', 'rental'] }];
+const compOf = (b) => b.comp || [b.key];
+const KEYWORDS = [[/บ้านโครงการ|หมู่บ้าน|บ้านจัดสรร|ทาวน์เฮ้าส์|ทาวน์โฮม|บ้านเดี่ยว/i, 'house'], [/ที่ดิน/i, 'land'], [/หอพัก|บ้านเช่า|ห้องเช่า|อพาร์ตเมนต์|apartment/i, 'rental'], [/กาแฟ|คาเฟ่|cafe|coffee/i, 'cafe'], [/อาหาร|ก๋วยเตี๋ยว|ตามสั่ง|ส้มตำ|ข้าวมัน|ข้าวแกง|restaurant/i, 'food'], [/ซักผ้า|ซักรีด|ซักอบ|laundry/i, 'laundry'], [/ร้านยา(?!ง)|ขายยา|เภสัช|pharma/i, 'pharmacy'], [/ตัดผม|เสริมสวย|ซาลอน|ทำผม|บาร์เบอร์|barber|salon/i, 'barber'], [/ล้างรถ|คาร์แคร์|car ?wash|car ?care/i, 'carwash'], [/ของชำ|โชห่วย|มินิมาร์ท|grocery/i, 'grocery']];
 const EXAMPLES = [['สยาม', 13.7455, 100.5340], ['อารีย์', 13.7797, 100.5448], ['ทองหล่อ', 13.7325, 100.5817], ['เซ็นทรัลลาดพร้าว', 13.8167, 100.5613], ['นิมมานเหมินท์ เชียงใหม่', 18.7995, 98.9680]];
 
 /* ---------- state ---------- */
@@ -428,8 +471,8 @@ const addrKey = (p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
 
 /* ---------- map data from OpenStreetMap (Overpass) ---------- */
 const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
-const MAIN_LIMIT = 1500, SCAN_LIMIT = 4000;
-const AMENITY = { cafe: 'cafe', restaurant: 'food', fast_food: 'food', food_court: 'food', pharmacy: 'pharmacy', car_wash: 'carwash', university: 'uni', college: 'uni', school: 'school', kindergarten: 'school', hospital: 'hospital', clinic: 'clinic', doctors: 'clinic', dentist: 'clinic', marketplace: 'market', coworking_space: 'coworking' };
+const MAIN_LIMIT = 1500, BIG_LIMIT = 7000, SCAN_LIMIT = 4000;
+const AMENITY = { cafe: 'cafe', restaurant: 'food', fast_food: 'food', food_court: 'food', pharmacy: 'pharmacy', car_wash: 'carwash', university: 'uni', college: 'uni', school: 'school', kindergarten: 'school', hospital: 'hospital', clinic: 'clinic', doctors: 'clinic', dentist: 'clinic', marketplace: 'market', coworking_space: 'coworking', student_accommodation: 'dorm' };
 const SHOPM = { convenience: ['grocery', 'convenience'], supermarket: ['grocery'], greengrocer: ['grocery'], chemist: ['pharmacy'], laundry: ['laundry'], dry_cleaning: ['laundry'], hairdresser: ['barber'], beauty: ['barber'], mall: ['mall'], department_store: ['mall'], books: ['bookstore'] };
 const BUILDING = { office: 'office', commercial: 'office', apartments: 'condo', dormitory: 'dorm', university: 'uni', school: 'school', hospital: 'hospital' };
 const stripRe = (s) => s.replace(/[.*+?^${}()|[\]\\"]/g, ' ').trim();
@@ -443,23 +486,27 @@ function categorize(t) {
   if (t.leisure === 'fitness_centre') cats.add('gym');
   if (t.railway === 'station' || t.public_transport === 'station') cats.add('station');
   if (t.highway) cats.add('mainroad');
+  if (t.landuse === 'residential' && (t.name || t['name:th'])) cats.add('housing');
   return [...cats];
 }
 
 function buildQuery(p, r, q, o = {}) {
-  const at = `(around:${r},${p.lat},${p.lng})`, wide = `(around:${o.wide || 2000},${p.lat},${p.lng})`;
+  const at = `(around:${r},${p.lat},${p.lng})`, wide = `(around:${o.wide || Math.max(2000, r)},${p.lat},${p.lng})`;
   const name = stripRe(q);
-  return `[out:json][timeout:${o.timeout || 60}];(
+  // wide areas (> 1.5 km) hold thousands of buildings: skip generic office/commercial buildings so the server can finish
+  const bld = Object.keys(BUILDING).filter((k) => !(r > 1500 && (k === 'office' || k === 'commercial'))).join('|');
+  return `[out:json][timeout:${o.timeout || (r > 1500 ? 120 : 60)}];(
 nwr${at}[amenity~"^(${Object.keys(AMENITY).join('|')})$"];
 nwr${at}[shop~"^(${Object.keys(SHOPM).join('|')})$"];
 nwr${at}[office];
-nwr${at}[building~"^(${Object.keys(BUILDING).join('|')})$"];
+nwr${at}[building~"^(${bld})$"];
+nwr${at}[landuse=residential][name];
 nwr${at}[leisure=fitness_centre];
 nwr${wide}[railway=station];
 nwr${wide}[public_transport=station];
 way(around:40,${p.lat},${p.lng})[highway~"^(motorway|trunk|primary|secondary)$"];
 ${name ? `nwr${at}[name~"${name}",i];` : ''}
-);out center tags ${o.limit || MAIN_LIMIT};`;
+);out center tags ${o.limit || (r > 1500 ? BIG_LIMIT : MAIN_LIMIT)};`;
 }
 
 async function overpass(query, ms = 75000) {
@@ -475,7 +522,7 @@ async function overpass(query, ms = 75000) {
       return j;
     } catch (e) { last = e; } finally { clearTimeout(timer); }
   }
-  throw new Error(`ดึงข้อมูลแผนที่ไม่สำเร็จ ลองใหม่ หรือลดรัศมีเป็น 300 ม. (${last && last.name === 'AbortError' ? 'หมดเวลา' : (last && last.message) || 'เชื่อมต่อไม่ได้'})`);
+  throw new Error(`ดึงข้อมูลแผนที่ไม่สำเร็จ ลองใหม่ หรือลดรัศมีให้เล็กลง (${last && last.name === 'AbortError' ? 'หมดเวลา' : (last && last.message) || 'เชื่อมต่อไม่ได้'})`);
 }
 
 function parsePlaces(json, q) {
@@ -509,10 +556,11 @@ function ensure(k) {
   cache.set(key, { status: 'loading', t: Date.now() });
   chain = chain.then(async () => {
     try {
-      const json = await overpass(buildQuery(p, radius, q));
-      cache.set(key, { status: 'ok', features: parsePlaces(json, q), truncated: (json.elements || []).length >= MAIN_LIMIT });
+      const json = await overpass(buildQuery(p, radius, q), radius > 1500 ? 140000 : 75000);
+      cache.set(key, { status: 'ok', features: parsePlaces(json, q), truncated: (json.elements || []).length >= (radius > 1500 ? BIG_LIMIT : MAIN_LIMIT) });
     } catch (e) { cache.set(key, { status: 'error', error: e.message }); }
     renderAll();
+    setTimeout(maybePromo, 1200);
   });
 }
 const refresh = () => { PIN_KEYS.forEach(ensure); renderAll(); };
@@ -545,9 +593,10 @@ function analyze(features, pin, b, radius) {
     if (v > 0) { dem += v; gens.push({ ...f, type: c, v }); }
   }
   gens.sort((x, y) => y.v - x.v);
-  const comps = inR.filter((f) => f.cats.includes(b.key)).sort((x, y) => x.d - y.d);
+  const cc = compOf(b);
+  const comps = inR.filter((f) => f.cats.some((c) => cc.includes(c))).sort((x, y) => x.d - y.d);
   const str = comps.reduce((s, c) => s + 0.9 * fall(c.d), 0);
-  const cm = inR.filter((f) => !f.cats.includes(b.key) && f.cats.some((c) => b.cmpl.includes(c))).sort((x, y) => x.d - y.d);
+  const cm = inR.filter((f) => !f.cats.some((c) => cc.includes(c)) && f.cats.some((c) => b.cmpl.includes(c))).sort((x, y) => x.d - y.d);
   const st = all.filter((f) => f.cats.includes('station')).sort((x, y) => x.d - y.d)[0] || null;
   const onMain = all.some((f) => f.cats.includes('mainroad'));
   let access;
@@ -597,7 +646,11 @@ function summary(a, b) {
   const sorted = FACTORS.filter((F) => a.f[F.k] != null).map((F) => ({ ...F, v: a.f[F.k] })).sort((x, y) => y.v - x.v);
   const pos = sorted.filter((x) => x.v >= 60).slice(0, 2).map((x) => phrase(x.k, true, a, b));
   const neg = sorted.slice().reverse().filter((x) => x.v < 50).slice(0, 2).map((x) => phrase(x.k, false, a, b));
-  const rec = a.total >= 75 ? `เหมาะเปิด${b.short} ควรไปดูพื้นที่จริงช่วง 7:30–9:00 และ 11:30–13:00 เพื่อนับคนเดินผ่าน`
+  const rec = b.prop ? (a.total >= 75 ? `ทำเลมีศักยภาพสูงสำหรับ${b.short} ควรตรวจน้ำท่วม ผังเมือง และเดินทางจริงช่วงเร่งด่วนก่อนตัดสินใจ`
+    : a.total >= 60 ? `น่าสนใจสำหรับ${b.short} แต่ควรเทียบราคา/ค่าเช่ากับทำเลรอบข้างและสำรวจหน้างานเพิ่ม`
+    : a.total >= 45 ? `ศักยภาพปานกลางสำหรับ${b.short} ควรเทียบกับทำเลอื่นก่อน และดูว่าเหมาะกับการใช้ประโยชน์แบบอื่นมากกว่าหรือไม่`
+    : `ยังไม่เด่นสำหรับ${b.short} ดูอันดับ "เหมาะกับทำอะไรบ้าง" ว่าทำเลนี้เหมาะกับการใช้งานแบบไหนมากกว่า`)
+    : a.total >= 75 ? `เหมาะเปิด${b.short} ควรไปดูพื้นที่จริงช่วง 7:30–9:00 และ 11:30–13:00 เพื่อนับคนเดินผ่าน`
     : a.total >= 60 ? 'มีศักยภาพ แต่ควรมีจุดขายที่ต่างจากคู่แข่ง และเช็คค่าเช่าเทียบกับทำเลอื่น'
     : a.total >= 45 ? 'ควรเทียบกับทำเลอื่นก่อนตัดสินใจ หรือเน้นเดลิเวอรี่ควบคู่หน้าร้าน'
     : `ไม่แนะนำสำหรับ${b.short} ลองย้ายหมุดไปใกล้แหล่งดึงคนมากขึ้น`;
@@ -629,7 +682,7 @@ function gridScan(feats, c, b) {
   for (let dy = -1000; dy <= 1000; dy += 250) for (let dx = -1000; dx <= 1000; dx += 250) {
     if (Math.hypot(dx, dy) > 1000) continue;
     const pt = { lat: c.lat + dy / 111320, lng: c.lng + dx / (111320 * cosLat) };
-    pts.push({ ...pt, total: analyze(feats, pt, b, S.radius).total, center: dx === 0 && dy === 0 });
+    pts.push({ ...pt, total: analyze(feats, pt, b, Math.min(S.radius, 1000)).total, center: dx === 0 && dy === 0 });
   }
   return pts;
 }
@@ -656,24 +709,58 @@ function runScan() {
   });
 }
 
-function aiPrompt() {
-  const b = bizNow(), parts = [];
-  parts.push(`คุณเป็นที่ปรึกษาด้านทำเลค้าปลีกในประเทศไทย ช่วยวิเคราะห์ว่าควรเปิด${b.label}ที่ทำเลต่อไปนี้หรือไม่`);
-  parts.push(`ข้อมูลทั้งหมดมาจาก OpenStreetMap (อาจไม่ครบ และไม่มีเรตติ้ง รีวิว ค่าเช่า หรือจำนวนคนเดินผ่านจริง) รัศมีวิเคราะห์ ${S.radius} เมตร`);
-  for (const k of PIN_KEYS) {
-    const e = entry(k);
-    if (e.state !== 'ok') continue;
-    const a = e.a, ad = S.addr[addrKey(S.pins[k])];
-    parts.push(`\nทำเล ${k}${ad ? ' (' + ad + ')' : ''} — คะแนนระบบ ${a.total}/100`);
-    parts.push('- คะแนนรายด้าน: ' + FACTORS.filter((F) => a.f[F.k] != null).map((F) => `${F.label} ${a.f[F.k]}`).join(', '));
-    parts.push(`- คู่แข่ง ${a.comps.length} แห่ง ใกล้สุด: ` + (a.comps.slice(0, 8).map((c) => `${c.name || 'ไม่มีชื่อ'} ${fmtM(c.d)}`).join(', ') || 'ไม่พบ'));
-    parts.push('- แหล่งดึงคน: ' + (a.gens.slice(0, 6).map((g) => `${g.name || TYPE_TH[g.type]} (${TYPE_TH[g.type]}) ${fmtM(g.d)}`).join(', ') || 'ไม่พบ'));
-    parts.push('- สถานีใกล้สุด: ' + (a.st ? `${a.st.name || 'สถานี'} ${fmtM(a.st.d)}` : 'ไม่มีใน 2 กม.') + (a.onMain ? ' · ติดถนนสายหลัก' : ''));
-    parts.push('- ธุรกิจที่เหมาะกับจุดนี้ตามข้อมูล: ' + fitRows(e).slice(0, 3).map((r) => `${r.label} ${r.total}`).join(', '));
-  }
-  parts.push('\nช่วยตอบเป็นภาษาไทย ไม่เกิน 250 คำ ได้แก่ 1) จุดเด่น 2) ความเสี่ยง 3) คำแนะนำที่ทำได้จริง 4) สิ่งที่ควรสำรวจหน้างานก่อนตัดสินใจ และถ้ามีหลายทำเลให้บอกว่าทำเลไหนเหมาะที่สุดเพราะอะไร ห้ามแต่งข้อมูลที่ไม่มีในข้อความนี้');
-  return parts.join('\n');
+// In-app deep analysis (rule-based on the map data; not a language model). Returns sections of {title, items[]}.
+function deepAnalysis(e, b) {
+  const a = e.a, rows = fitRows(e), rank = rows.findIndex((r) => r.key === b.key) + 1;
+  const sec = [];
+  const v = verdict(a.total);
+  const top = rows[0];
+  sec.push({ title: 'ภาพรวม', items: [
+    `ทำเลนี้ได้ ${a.total}/100 (${v.th}) สำหรับ${b.short}${rank ? ` อยู่อันดับ ${rank} จาก ${rows.length} การใช้งานที่เทียบ` : ''}`,
+    top.key === b.key ? `${b.short}เป็นการใช้งานที่เหมาะกับจุดนี้ที่สุดตามข้อมูล` : `ตามข้อมูล จุดนี้เหมาะกับ${top.short} (${top.total}) มากกว่า${b.short}`,
+  ] });
+  // who is around: share of demand by source type
+  const mix = {}; let tot = 0;
+  for (const g of a.gens) { mix[g.type] = (mix[g.type] || 0) + g.v; tot += g.v; }
+  const mixRows = Object.entries(mix).sort((x, y) => y[1] - x[1]).slice(0, 4);
+  const cnt = (t) => a.gens.filter((g) => g.type === t).length;
+  const who = mixRows.map(([t, val]) => `${TYPE_TH[t]} ${cnt(t)} แห่ง (${Math.round(100 * val / tot)}% ของแรงดึงคน)`);
+  const lead = mixRows[0] && mixRows[0][0];
+  const rhythm = !lead ? 'ข้อมูลแหล่งดึงคนน้อย จังหวะลูกค้าจึงประเมินยาก ควรนับคนเดินผ่านหน้างานจริง'
+    : ['office', 'uni', 'school'].includes(lead) ? 'แรงดึงคนหลักเป็นกลุ่มทำงาน/เรียน คึกคักวันธรรมดาช่วงเช้า–เที่ยง วันหยุดอาจเงียบ'
+    : ['condo', 'dorm'].includes(lead) ? 'แรงดึงคนหลักเป็นคนอยู่อาศัย คึกคักช่วงเย็น กลางคืน และวันหยุด'
+    : lead === 'hospital' ? 'แรงดึงคนหลักเป็นโรงพยาบาล มีคนใช้ทั้งวัน ผู้ป่วยและญาติเป็นลูกค้าสำคัญ'
+    : lead === 'station' ? 'แรงดึงคนหลักคือสถานี คนเดินผ่านสูงช่วงเร่งด่วนเช้า–เย็น' : 'แรงดึงคนหลักมาจากห้างสรรพสินค้า คึกคักช่วงบ่ายถึงค่ำและวันหยุด';
+  sec.push({ title: 'ใครอยู่รอบทำเลนี้', items: [who.length ? who.join(' · ') : 'ไม่พบแหล่งดึงคนในรัศมีนี้', rhythm] });
+  // competition
+  const area = Math.PI * (S.radius / 1000) ** 2, dens = a.comps.length / area;
+  const comp = [`พบ${b.short}ที่เกี่ยวข้อง ${a.comps.length} แห่งในรัศมี ${S.radius >= 1000 ? S.radius / 1000 + ' กม.' : S.radius + ' ม.'} (ประมาณ ${dens.toFixed(1)} แห่งต่อ ตร.กม.)`];
+  if (a.comps[0]) comp.push(`ใกล้สุด: ${a.comps.slice(0, 3).map((c) => `${c.name || '(ไม่มีชื่อ)'} ${fmtM(c.d)}`).join(', ')}`);
+  comp.push(a.f.comp >= 65 ? 'การแข่งขันต่ำ ถ้ามีแหล่งดึงคนรองรับ ถือเป็นช่องว่างตลาด' : a.f.comp >= 45 ? 'การแข่งขันปานกลาง ต้องมีจุดขายที่ชัดเพื่อแย่งส่วนแบ่ง' : 'การแข่งขันสูง ต้องมีจุดต่างที่ชัดหรือเลือกทำเลอื่น');
+  sec.push({ title: 'คู่แข่งและการแข่งขัน', items: comp });
+  // actions per weak / strong factor
+  const act = [];
+  if (a.f.demand < 50) act.push(b.prop ? 'แหล่งงาน/สถานศึกษาในรัศมีมีน้อย ผู้ซื้อหรือผู้เช่าอาจต้องเดินทางไกล ตรวจเส้นทางและระบบขนส่งเพิ่ม' : 'แหล่งดึงคนน้อย: เน้นเดลิเวอรี่ ป้ายหน้าร้านชัด และการตลาดออนไลน์ในละแวกใกล้เคียง');
+  if (a.f.comp < 50) act.push(b.prop ? 'ซัพพลายคล้ายกันหนาแน่น: เทียบราคา/ค่าเช่าและจุดขายของโครงการรอบข้างก่อนตัดสินใจ' : 'คู่แข่งหนาแน่น: หาจุดต่าง เช่น เมนู/บริการเฉพาะทาง เวลาเปิด–ปิด หรือราคา');
+  if (a.f.access < 50) act.push(b.access === 'road' ? 'ไม่ติดถนนสายหลัก: ตรวจความกว้างทางเข้า ที่จอดรถ และป้ายบอกทาง' : 'ไกลสถานี/ถนนใหญ่: ตรวจรถสาธารณะ ที่จอดรถ และเวลาเดินทางจริง');
+  if (a.f.cmpl < 40) act.push('ธุรกิจที่ส่งเสริมกันในละแวกยังน้อย: ย่านอาจยังไม่คึกคัก ดูแนวโน้มการพัฒนาในอนาคต');
+  if (a.f.demand >= 65) act.push('แหล่งดึงคนแน่น: วางตำแหน่งให้ตรงกลุ่มหลักที่ระบุข้างต้นและเปิดให้ตรงจังหวะของกลุ่มนั้น');
+  if (a.f.access >= 70) act.push('การเดินทางสะดวก: ใช้เป็นจุดขายในการสื่อสารกับลูกค้า');
+  sec.push({ title: 'แนวทางที่แนะนำ', items: act.length ? act : ['ปัจจัยหลักอยู่ระดับกลาง ไม่มีจุดอ่อนเด่น ควรเน้นการสำรวจหน้างานและเทียบกับทำเลอื่น'] });
+  // best uses
+  sec.push({ title: 'เหมาะกับทำอะไรบ้าง', items: rows.slice(0, 3).map((r, i) => `${i + 1}. ${r.label} · ${r.total} คะแนน (${verdict(r.total).th})`).concat(rows[rows.length - 1].total < 45 ? [`ไม่ค่อยเหมาะกับ: ${rows[rows.length - 1].short} (${rows[rows.length - 1].total})`] : []) });
+  // on-site checklist
+  sec.push({ title: 'สิ่งที่ควรสำรวจหน้างาน', items: b.prop
+    ? ['ระดับน้ำท่วมและการระบายน้ำ (ถามคนในพื้นที่)', 'ผังเมืองและสิทธิ์การใช้ที่ดิน', 'เวลาเดินทางจริงไปแหล่งงานช่วงเร่งด่วน', 'ราคาซื้อ/ค่าเช่าเทียบ 3 แห่งรอบข้าง', 'ความปลอดภัย แสงสว่าง และเสียงรบกวน']
+    : ['นับคนเดินผ่านหน้าทำเล 3 ช่วง: เช้า เที่ยง เย็น ทั้งวันธรรมดาและวันหยุด', 'ค่าเช่าและเงื่อนไขสัญญาเทียบ 2–3 ทำเล', 'ที่จอดรถ ป้าย และการมองเห็นหน้าร้าน', 'ไปลองใช้บริการร้านคู่แข่งใกล้สุดเพื่อดูคิวและราคา'] });
+  const notes = [`ข้อมูลมาจาก OpenStreetMap นับสถานที่ได้ ${e.features.length} รายการในรัศมีนี้`];
+  if (e.features.length < 15) notes.push('ข้อมูลในพื้นที่นี้ค่อนข้างน้อย ผลอาจคลาดเคลื่อน ควรเชื่อการสำรวจจริงมากกว่า');
+  if (e.truncated) notes.push('พื้นที่หนาแน่นมาก ข้อมูลอาจนับไม่ครบ');
+  notes.push('การวิเคราะห์นี้คำนวณด้วยสูตรกฎในแอพ ไม่ใช่ปัญญาประดิษฐ์ ไม่รวมราคา ค่าเช่า และกำลังซื้อ');
+  sec.push({ title: 'ความน่าเชื่อถือของข้อมูล', items: notes });
+  return sec;
 }
+const deepHTML = (e, b) => deepAnalysis(e, b).map((s) => `<div class="dp"><h5>${esc(s.title)}</h5><ul>${s.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
 
 function buildReport() {
   const b = bizNow(), now = new Date();
@@ -685,7 +772,7 @@ function buildReport() {
     <p><b>คะแนนรวม ${a.total}/100 (${v.th})</b> · พิกัด ${S.pins[k].lat.toFixed(5)}, ${S.pins[k].lng.toFixed(5)} · รัศมี ${S.radius} ม.</p>
     <table class="pg"><tr><th>ด้าน</th><th>คะแนน</th><th>น้ำหนัก</th></tr>${FACTORS.map((F) => `<tr><td>${F.label}</td><td>${a.f[F.k] ?? 'ไม่มีข้อมูล'}</td><td>${Math.round(WEIGHTS[F.k] * 100)}%</td></tr>`).join('')}</table>
     <h3>สรุป</h3><ul>${t.pos.map((s) => `<li>+ ${esc(s)}</li>`).join('')}${t.neg.map((s) => `<li>! ${esc(s)}</li>`).join('')}<li>${esc(t.tip)}</li></ul><p><b>${esc(t.rec)}</b></p>
-    <h3>ธุรกิจที่เหมาะกับจุดนี้ (เทียบ 7 ประเภท)</h3><table class="pg"><tr><th>ประเภท</th><th>คะแนน</th></tr>${fitRows(e).map((r) => `<tr><td>${esc(r.label)}${r.key === S.biz ? ' (ที่เลือก)' : ''}</td><td>${r.total}</td></tr>`).join('')}</table>
+    <h3>เหมาะกับทำอะไรบ้าง (เทียบ ${Object.keys(BIZ).length} ประเภท)</h3><table class="pg"><tr><th>ประเภท</th><th>คะแนน</th></tr>${fitRows(e).map((r) => `<tr><td>${esc(r.label)}${r.key === S.biz ? ' (ที่เลือก)' : ''}</td><td>${r.total}</td></tr>`).join('')}</table>
     <h3>คู่แข่งในรัศมี (${a.comps.length} แห่ง · แสดง 12 ใกล้สุด)</h3><table class="pg"><tr><th>ชื่อ</th><th>ระยะ</th></tr>${a.comps.slice(0, 12).map((c) => `<tr><td>${esc(c.name || '(ไม่มีชื่อ)')}</td><td>${fmtM(c.d)}</td></tr>`).join('') || '<tr><td colspan="2">ไม่พบ</td></tr>'}</table>
     <h3>แหล่งดึงคนเด่น</h3><table class="pg"><tr><th>ชื่อ</th><th>ประเภท</th><th>ระยะ</th></tr>${a.gens.slice(0, 8).map((g) => `<tr><td>${esc(g.name || TYPE_TH[g.type])}</td><td>${TYPE_TH[g.type]}</td><td>${fmtM(g.d)}</td></tr>`).join('') || '<tr><td colspan="3">ไม่พบ</td></tr>'}</table></div>`;
   }).join('');
@@ -710,7 +797,10 @@ function bizPicker() {
   <form class="custom" data-form="custom"><input name="c" type="text" value="${esc(S.custom)}" placeholder="เช่น ร้านดอกไม้ ร้านซ่อมมือถือ" maxlength="40" aria-label="ประเภทร้านอื่นๆ" autocomplete="off"><button type="submit">วิเคราะห์</button></form>
   ${S.biz === 'custom' ? `<div class="chips"><span class="chip" aria-pressed="true">กำลังวิเคราะห์: ${esc(S.custom)}</span></div>` : ''}</div></div>`;
 }
-const radiusSeg = () => `<div class="seg" role="group" aria-label="รัศมี">${[300, 500, 1000].map((m) => `<button data-act="radius" data-v="${m}" aria-pressed="${S.radius === m}">${m >= 1000 ? '1 กม.' : m + ' ม.'}</button>`).join('')}</div>`;
+const RADII = [300, 500, 1000, 2000, 5000];
+const radiusLbl = (m) => (m >= 1000 ? +(m / 1000).toFixed(1) + ' กม.' : m + ' ม.');
+const radiusSeg = () => `<div class="seg rseg" role="group" aria-label="รัศมี">${RADII.map((m) => `<button data-act="radius" data-v="${m}" aria-pressed="${S.radius === m}">${radiusLbl(m)}</button>`).join('')}<button data-act="dlg" data-v="radius" aria-pressed="${!RADII.includes(S.radius)}">${RADII.includes(S.radius) ? 'กำหนดเอง' : radiusLbl(S.radius)}</button></div>`;
+const secs = (since, plain) => { const n = Math.max(0, Math.round((Date.now() - since) / 1000)); return plain ? `${n} วินาที` : `(${n} วินาที)`; };
 const legend = (b) => `<div class="legend"><span><i class="lg c"></i>คู่แข่ง (${esc(b.short)})</span><span><i class="lg g"></i>แหล่งดึงคน</span><span><i class="lg k"></i>ธุรกิจที่ส่งเสริม</span></div>`;
 const legalLinks = () => `<div class="legal-links"><p>ผลวิเคราะห์เป็นข้อมูลประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางธุรกิจหรือการลงทุน ควรสำรวจพื้นที่จริงก่อนตัดสินใจ</p><div><button data-act="dlg" data-v="method">วิธีคิดคะแนนและข้อจำกัด</button><button data-act="dlg" data-v="privacy">ความเป็นส่วนตัว</button><button data-act="dlg" data-v="contrib">ส่งผลจริงช่วยปรับปรุงสูตร</button><button data-act="dlg" data-v="install">ติดตั้งเป็นแอพบนมือถือ</button></div></div>`;
 
@@ -741,21 +831,25 @@ function scanHTML() {
 
 function proCardHTML(e) {
   if (!ENT.active) {
-    return `<div class="pro"><div class="pro-h"><h3>วิเคราะห์เชิงลึก <span class="badge">PRO</span></h3><button class="act primary" data-act="dlg" data-v="license">ปลดล็อก</button></div>
-    <ul class="lockl"><li>${LOCK}ธุรกิจที่เหมาะกับทำเลนี้ที่สุด (เทียบ 7 ประเภท)</li><li>${LOCK}สแกนหาจุดที่คะแนนสูงกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>${LOCK}รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>${LOCK}ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul></div>`;
+    const tr = trialEligible();
+    return `<div class="pro"><div class="pro-h"><h3>ข้อมูลเชิงลึก <span class="badge">PRO</span></h3></div>
+    <p class="small" style="margin:0">ส่วนที่ฟรีใช้ได้ตลอด ถ้าอยากรู้ละเอียดกว่านี้ PRO ให้คุณ:</p>
+    <ul class="lockl"><li>${LOCK}ทำเลนี้เหมาะกับทำอะไรบ้าง จัดอันดับ ${Object.keys(BIZ).length} ประเภท รวมบ้านโครงการ ที่ดิน หอพัก</li><li>${LOCK}วิเคราะห์เชิงลึกในแอพ: ใครอยู่รอบทำเล จังหวะลูกค้า การแข่งขัน แนวทางที่แนะนำ สิ่งที่ต้องสำรวจ</li><li>${LOCK}สแกนหาจุดที่คะแนนสูงกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>${LOCK}รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li></ul>
+    <div class="actrow">${tr ? '<button class="act primary" data-act="plan-open" data-v="trial">ลองใช้ 7 วัน 69 บาท</button>' : ''}<button class="act ${tr ? '' : 'primary'}" data-act="plan-open" data-v="month">PRO 690 บาท/เดือน</button></div></div>`;
   }
   const rows = fitRows(e), b = bizNow(), cur = rows.find((r) => r.key === S.biz);
   const fitNote = S.biz === 'custom' ? 'ประเภทที่พิมพ์เองไม่อยู่ในการเทียบนี้' : rows[0].key === S.biz ? `${esc(b.short)}เหมาะกับจุดนี้ที่สุดในกลุ่ม` : `จุดนี้เหมาะกับ${esc(rows[0].short)} (${rows[0].total}) มากกว่า${esc(b.short)} (${cur ? cur.total : '—'})`;
   return `<div class="pro"><div class="pro-h"><h3>วิเคราะห์เชิงลึก <span class="badge">PRO</span></h3></div>
-  <div><h4>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด</h4><p class="small muted" style="margin:0 0 4px">${fitNote}</p><p class="small muted" style="margin:0 0 8px">จัดอันดับจากความต้องการและคู่แข่งในพื้นที่ ยังไม่รวมค่าเช่า ต้นทุน และกำลังซื้อ ใช้เป็นไอเดียตั้งต้น</p><div class="fit">${rows.map((r, i) => `<div class="fit-row ${r.key === S.biz ? 'cur' : ''}"><span><b>${i + 1}. ${esc(r.label)}</b>${r.key === S.biz ? ' (ที่เลือก)' : ''}</span><span class="num">${r.total}</span><div class="bar"><i class="${tone(r.total)}" style="width:${r.total}%"></i></div></div>`).join('')}</div></div>
+  <div><h4>ทำเลนี้เหมาะกับทำอะไรบ้าง</h4><p class="small muted" style="margin:0 0 4px">${fitNote}</p><p class="small muted" style="margin:0 0 8px">จัดอันดับจากความต้องการและคู่แข่ง/ซัพพลายในพื้นที่ ยังไม่รวมราคา ค่าเช่า ต้นทุน และกำลังซื้อ ใช้เป็นไอเดียตั้งต้น</p><div class="fit">${rows.map((r, i) => `<div class="fit-row ${r.key === S.biz ? 'cur' : ''}"><span><b>${i + 1}. ${esc(r.label)}</b>${r.key === S.biz ? ' (ที่เลือก)' : ''}</span><span class="num">${r.total}</span><div class="bar"><i class="${tone(r.total)}" style="width:${r.total}%"></i></div></div>`).join('')}</div></div>
   ${scanHTML()}
-  <div><h4>รายงานและ AI</h4><div class="actrow"><button class="act" data-act="report">รายงานฉบับเต็ม (พิมพ์/PDF)</button><button class="act" data-act="aiprompt">คัดลอกคำสั่งถาม AI</button></div><p class="small muted" style="margin:6px 0 0">คำสั่งถาม AI ใช้วางใน ChatGPT, Claude หรือ Gemini ของคุณเอง</p></div></div>`;
+  <div><h4>วิเคราะห์เชิงลึกสำหรับทำเลนี้</h4><div class="deep">${deepHTML(e, b)}</div></div>
+  <div><h4>รายงาน</h4><div class="actrow"><button class="act" data-act="report">รายงานฉบับเต็ม (พิมพ์/PDF)</button></div></div></div>`;
 }
 
 function analysisHTML(k) {
   const e = entry(k), b = bizNow();
   if (e.state === 'empty') return `<p class="empty">ยังไม่ได้ปักหมุดทำเล ${k} เลือกทำเล ${k} แล้วแตะบนแผนที่ ค้นหาสถานที่ หรือกดปุ่มตำแหน่งปัจจุบัน</p>`;
-  if (e.state === 'loading') return `<p class="empty">กำลังดึงข้อมูลร้านค้าและสถานที่รอบทำเล ${k}… <b class="elapsed" data-since="${e.since || Date.now()}"></b><br><span class="small">เซิร์ฟเวอร์ข้อมูลแผนที่ฟรีอาจใช้เวลาครึ่งนาที ถ้าช้า ลองลดรัศมีเป็น 300 ม.</span></p>`;
+  if (e.state === 'loading') return `<p class="empty">กำลังวิเคราะห์ทำเล ${k} รอสักครู่… <b class="elapsed" data-since="${e.since || Date.now()}" data-plain="1">${secs(e.since || Date.now(), true)}</b><br><span class="small">เซิร์ฟเวอร์ข้อมูลแผนที่ฟรีอาจใช้เวลาครึ่งนาที ถ้าช้า ลองลดรัศมีให้เล็กลง</span></p>`;
   if (e.state === 'error') return `<p class="empty err">${esc(e.error)}</p><button class="act" data-act="retry">ลองใหม่</button>`;
   const a = e.a, v = verdict(a.total), t = summary(a, b);
   return `<div class="score">${ring(a.total)}<div class="sinfo"><div class="eb">${pb(k)}ทำเล ${k}</div><div class="small muted">${esc(addr(k) || 'กำลังหาที่อยู่…')}</div><div><span class="pill ${v.c}">${v.th}</span></div><div class="small muted">${a.st ? esc((a.st.name || 'สถานี') + ' ' + fmtM(a.st.d)) : 'ไม่มีสถานีในระยะ 2 กม.'}</div></div></div>
@@ -810,7 +904,7 @@ const map = L.map('map', { zoomControl: true }).setView([S.pins.A.lat, S.pins.A.
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
 const scanLayer = L.layerGroup().addTo(map), placesLayer = L.layerGroup().addTo(map), pinsLayer = L.layerGroup().addTo(map);
 let radiusCircle = null, meMarker = null;
-const roleOf = (f, b) => (f.cats.includes(b.key) ? 'comp' : f.cats.some((c) => (b.w[c] || 0) > 0) ? 'gen' : f.cats.some((c) => b.cmpl.includes(c)) ? 'cmpl' : null);
+const roleOf = (f, b) => (f.cats.some((c) => compOf(b).includes(c)) ? 'comp' : f.cats.some((c) => (b.w[c] || 0) > 0) ? 'gen' : f.cats.some((c) => b.cmpl.includes(c)) ? 'cmpl' : null);
 const ROLE_COLOR = { comp: '#d23f33', gen: '#1f6fb2', cmpl: '#2b9a43' };
 const heatColor = (v) => (v >= 65 ? '#1d8549' : v >= 45 ? '#b77d06' : '#c8372d');
 
@@ -824,7 +918,7 @@ function drawMap() {
   }
   if (ap) radiusCircle = L.circle([ap.lat, ap.lng], { radius: S.radius, color: PIN_COLOR[S.active], weight: 2, dashArray: '8 6', fillColor: PIN_COLOR[S.active], fillOpacity: .06, interactive: false }).addTo(map);
   const e = entry(S.active);
-  if (e.state === 'ok') for (const f of e.features) {
+  if (e.state === 'ok') for (const f of e.features.slice(0, 1500)) {
     const role = roleOf(f, b);
     if (!role) continue;
     L.circleMarker([f.lat, f.lng], { radius: role === 'comp' ? 7 : role === 'gen' ? 6 : 5, color: '#fff', weight: 2, fillColor: ROLE_COLOR[role], fillOpacity: .92, bubblingMouseEvents: false })
@@ -837,7 +931,16 @@ function drawMap() {
   });
   if (S.me) { if (!meMarker) meMarker = L.marker([S.me.lat, S.me.lng], { icon: L.divIcon({ className: '', html: '<div class="lme"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), interactive: false }).addTo(map); else meMarker.setLatLng([S.me.lat, S.me.lng]); }
 }
-function renderAll() { renderHeader(); renderSide(); renderPanel(); renderMobile(); drawMap(); }
+// big, always-visible "analysing" notice with live seconds
+function renderBusy() {
+  let el = $('#busy');
+  const e = entry(S.active), sc = S.scan && S.scan.key === scanKey() && S.scan.status === 'loading' ? S.scan : null;
+  const since = e.state === 'loading' ? (e.since || Date.now()) : sc ? sc.t : 0;
+  if (!since) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'busy'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.innerHTML = `<span class="spin"></span><div><b>กำลังวิเคราะห์ รอสักครู่…</b><span class="big"><b class="elapsed" data-since="${since}" data-plain="1">${secs(since, true)}</b></span><small>${sc ? 'สแกนพื้นที่ใหญ่ ใช้เวลา 1–2 นาที' : S.radius >= 2000 ? 'รัศมีกว้าง ข้อมูลเยอะ อาจใช้เวลา 30–90 วินาที' : 'โดยปกติใช้เวลา 5–30 วินาที'}</small></div>`;
+}
+function renderAll() { renderHeader(); renderSide(); renderPanel(); renderMobile(); drawMap(); renderBusy(); }
 
 /* ---------- actions ---------- */
 let toastTimer;
@@ -904,7 +1007,18 @@ function goto(i) {
 }
 
 /* ---------- dialogs ---------- */
-const licenseStatus = () => (ENT.kind === 'paid' ? `<p><span class="badge">PRO</span> ใช้งานได้ถึง <b>${fmtDate(ENT.until)}</b></p>` : ENT.kind === 'trial' ? `<p>ทดลองใช้ PRO ฟรีเหลือ <b>${ENT.daysLeft} วัน</b> หลังจากนั้นฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>` : `<p>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO แล้ว'} ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>`);
+let payPlan = null; // plan currently shown in the payment dialog
+const licenseStatus = () => (ENT.kind === 'paid' ? `<p><span class="badge">PRO</span> ใช้งานได้ถึง <b>${fmtDate(ENT.until)}</b></p>` : `<p>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว ' : ''}ฟังก์ชันพื้นฐานใช้ฟรีตลอด ไม่ต้องสมัครหรือใส่รหัส</p>`);
+const PRO_LIST = () => `<ul><li><b>ทำเลนี้เหมาะกับทำอะไรบ้าง</b> จัดอันดับ ${Object.keys(BIZ).length} ประเภท รวมบ้านโครงการ ที่ดิน บ้านเช่า/หอพัก</li><li><b>วิเคราะห์เชิงลึกในแอพ</b> ใครอยู่รอบทำเลและจังหวะลูกค้า การแข่งขัน แนวทางที่แนะนำ สิ่งที่ต้องสำรวจหน้างาน</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li></ul>`;
+function planPicker() {
+  const plan = payPlan || (trialEligible() ? 'trial' : 'month'), P = CONFIG.PLANS[plan], id = deviceId();
+  const cards = ['trial', 'month'].filter((k) => k !== 'trial' || trialEligible()).map((k) => `<button type="button" class="plancard" data-act="plan" data-v="${k}" aria-pressed="${plan === k}"><b>${CONFIG.PLANS[k].name}</b><span class="num">${CONFIG.PLANS[k].price} บาท</span><small>${k === 'trial' ? 'ใช้ PRO เต็มที่ 7 วัน ชำระครั้งเดียว' : 'ใช้ PRO ต่อเนื่อง 30 วัน'}</small></button>`).join('');
+  const url = CONFIG.PAY_URL[plan];
+  const pay = url
+    ? `<a class="dlg-primary paybtn" href="${esc(url)}">ชำระด้วยบัตร ${P.price} บาท</a><p class="small muted">กรอกข้อมูลบัตรในหน้าชำระเงินที่ปลอดภัยของผู้ให้บริการ (แอพนี้ไม่เห็นเลขบัตร) ตัดบัตรสำเร็จ PRO เปิดใช้อัตโนมัติ ไม่ต้องรออนุมัติ</p>`
+    : `<p class="small muted">การชำระด้วยบัตรกำลังเปิดให้บริการเร็วๆ นี้ ตอนนี้ชำระผ่านพร้อมเพย์ได้ทันที</p>${payBlock(P.price)}`;
+  return `<div class="plans">${cards}</div>${pay}`;
+}
 function contribForm() {
   const pins = PIN_KEYS.filter((k) => S.pins[k]);
   if (!pins.length) return '<h3>ส่งผลจริงช่วยปรับปรุงสูตร</h3><p>ปักหมุดทำเลก่อน แล้วกลับมาส่งผลจริงของทำเลนั้น</p>';
@@ -952,12 +1066,12 @@ function qrSvg(text) {
   q.make();
   return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
 }
-function payBlock() {
+function payBlock(amount) {
   const id = deviceId();
   const idLine = `<p class="small muted">รหัสอ้างอิงของคุณ <b class="num">${id}</b></p>`;
-  if (!CONFIG.PROMPTPAY) return `<p>ระบบชำระเงินกำลังเตรียมเปิดให้บริการ ตอนนี้ใช้งานฟรีได้ตามช่วงทดลอง</p>${idLine}`;
-  const svg = qrSvg(promptpayPayload(CONFIG.PROMPTPAY, CONFIG.PRICE));
-  return `<div class="pay"><div class="qr">${svg}</div><ol><li>สแกน QR พร้อมเพย์ด้วยแอพธนาคาร (ใส่ยอด <b>${CONFIG.PRICE} บาท</b> ให้แล้ว) หรือ <button type="button" class="act" data-act="copypp">คัดลอกเลขพร้อมเพย์</button> ไปโอนเอง</li><li>ใส่ <b class="num">${id}</b> ในช่อง "บันทึกช่วยจำ" ตอนโอน <button type="button" class="act" data-act="copyid">คัดลอก</button></li><li>ทีมงานตรวจยอดแล้วเปิดใช้ให้ กลับมาเปิดแอพนี้ได้เลย ไม่ต้องกรอกอะไรอีก</li></ol></div>${idLine}`;
+  if (!CONFIG.PROMPTPAY) return `<p>ระบบชำระเงินกำลังเตรียมเปิดให้บริการ ตอนนี้ใช้ฟังก์ชันฟรีได้ตามปกติ</p>${idLine}`;
+  const svg = qrSvg(promptpayPayload(CONFIG.PROMPTPAY, amount));
+  return `<div class="pay"><div class="qr">${svg}</div><ol><li>สแกน QR พร้อมเพย์ด้วยแอพธนาคาร (ใส่ยอด <b>${amount} บาท</b> ให้แล้ว) หรือ <button type="button" class="act" data-act="copypp">คัดลอกเลขพร้อมเพย์</button> ไปโอนเอง</li><li>ใส่ <b class="num">${id}</b> ในช่อง "บันทึกช่วยจำ" ตอนโอน <button type="button" class="act" data-act="copyid">คัดลอก</button></li><li>ทีมงานตรวจยอดแล้วเปิดใช้ให้ กลับมาเปิดแอพนี้ได้เลย ไม่ต้องกรอกอะไรอีก</li></ol></div>${idLine}`;
 }
 
 function installDialog() {
@@ -984,15 +1098,17 @@ function installDialog() {
 
 const DLG = {
   consent: () => `<h3>ขออนุญาตใช้ตำแหน่งปัจจุบันของคุณ</h3><p>เพื่อปักหมุดทำเลตรงตำแหน่งที่คุณยืนอยู่ แอพจะอ่านพิกัดจากอุปกรณ์ของคุณ</p><ul><li>ใช้เพื่อวางหมุดและวิเคราะห์ทำเลรอบตำแหน่งนั้นเท่านั้น</li><li>พิกัดจะถูกส่งจากเบราว์เซอร์ของคุณไปยังบริการแผนที่สาธารณะ (OpenStreetMap, Overpass, Photon) เพื่อค้นหาร้านค้าและที่อยู่</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง ไม่เก็บและไม่ส่งพิกัดของคุณไปที่อื่น</li><li>ถอนความยินยอมได้ทุกเมื่อที่ปุ่ม "ความเป็นส่วนตัว" และยังใช้งานต่อได้ด้วยการปักหมุดเองหรือค้นหาสถานที่</li></ul><div class="dlg-actions"><button class="dlg-ghost" data-act="close">ไม่ยินยอม</button><button class="dlg-primary" data-act="accept">ยินยอมและใช้ตำแหน่ง</button></div>`,
-  privacy: () => `<h3>ความเป็นส่วนตัวและข้อมูลส่วนบุคคล</h3><h4>ข้อมูลที่ใช้</h4><ul><li><b>ตำแหน่งปัจจุบัน (GPS)</b> ใช้เมื่อคุณกดปุ่ม "ตำแหน่งปัจจุบัน" และให้ความยินยอมเท่านั้น</li><li><b>ตำแหน่งที่ปักหมุดและคำค้นหา</b> ใช้เพื่อวิเคราะห์ทำเลและค้นหาสถานที่</li><li>แอพไม่ขอชื่อ อีเมล หรือเบอร์โทร และไม่มีการสมัครสมาชิก</li></ul><h4>ผู้ที่ได้รับข้อมูล</h4><ul><li>เบราว์เซอร์ของคุณส่งพิกัดและคำค้นหาตรงไปยัง OpenStreetMap (ภาพแผนที่), Overpass (ข้อมูลร้านค้า) และ Photon (ค้นหาสถานที่และที่อยู่) บริการเหล่านี้เห็นหมายเลข IP ของคุณตามปกติของการเปิดเว็บ</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง จึงไม่เก็บข้อมูลของคุณไว้</li><li>ฟังก์ชัน "ส่งผลจริง" จะส่งข้อมูลให้ทีมงานก็ต่อเมื่อคุณติ๊กยินยอมและกดส่งเองผ่าน LINE (ซึ่งเป็นบริการของบุคคลที่สาม)</li><li>ฟังก์ชัน "คัดลอกคำสั่งถาม AI" ข้อมูลทำเลที่คัดลอกจะไปอยู่กับ AI ที่คุณเลือกวางเอง</li></ul><h4>การเก็บรักษา</h4><ul><li>ผลวิเคราะห์อยู่ในหน้าจอนี้เท่านั้น ปิดหน้าแล้วหายไป</li><li>เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น: การให้ความยินยอมใช้ตำแหน่ง วันเริ่มทดลอง PRO และสิทธิ์ PRO ที่ปลดล็อกแล้ว</li></ul><p class="muted small">สิทธิของคุณ: ถอนความยินยอมได้ทุกเมื่อด้วยปุ่มด้านล่าง</p>${getConsent() ? '<div class="dlg-actions"><button class="dlg-ghost" data-act="withdraw">ถอนความยินยอมใช้ตำแหน่ง</button></div>' : '<p class="muted small">ตอนนี้คุณยังไม่ได้ให้ความยินยอมใช้ตำแหน่งปัจจุบัน</p>'}`,
+  privacy: () => `<h3>ความเป็นส่วนตัวและข้อมูลส่วนบุคคล</h3><h4>ข้อมูลที่ใช้</h4><ul><li><b>ตำแหน่งปัจจุบัน (GPS)</b> ใช้เมื่อคุณกดปุ่ม "ตำแหน่งปัจจุบัน" และให้ความยินยอมเท่านั้น</li><li><b>ตำแหน่งที่ปักหมุดและคำค้นหา</b> ใช้เพื่อวิเคราะห์ทำเลและค้นหาสถานที่</li><li>แอพไม่ขอชื่อ อีเมล หรือเบอร์โทร และไม่มีการสมัครสมาชิก</li></ul><h4>ผู้ที่ได้รับข้อมูล</h4><ul><li>เบราว์เซอร์ของคุณส่งพิกัดและคำค้นหาตรงไปยัง OpenStreetMap (ภาพแผนที่), Overpass (ข้อมูลร้านค้า) และ Photon (ค้นหาสถานที่และที่อยู่) บริการเหล่านี้เห็นหมายเลข IP ของคุณตามปกติของการเปิดเว็บ</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง จึงไม่เก็บข้อมูลของคุณไว้</li><li>ฟังก์ชัน "ส่งผลจริง" จะส่งข้อมูลให้ทีมงานก็ต่อเมื่อคุณติ๊กยินยอมและกดส่งเองผ่าน LINE (ซึ่งเป็นบริการของบุคคลที่สาม)</li><li>การชำระด้วยบัตรทำที่หน้าของผู้ให้บริการชำระเงิน แอพนี้ไม่เห็นและไม่เก็บเลขบัตรของคุณ</li></ul><h4>การเก็บรักษา</h4><ul><li>ผลวิเคราะห์อยู่ในหน้าจอนี้เท่านั้น ปิดหน้าแล้วหายไป</li><li>เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น: การให้ความยินยอมใช้ตำแหน่ง และสิทธิ์ PRO ที่ปลดล็อกแล้ว</li></ul><p class="muted small">สิทธิของคุณ: ถอนความยินยอมได้ทุกเมื่อด้วยปุ่มด้านล่าง</p>${getConsent() ? '<div class="dlg-actions"><button class="dlg-ghost" data-act="withdraw">ถอนความยินยอมใช้ตำแหน่ง</button></div>' : '<p class="muted small">ตอนนี้คุณยังไม่ได้ให้ความยินยอมใช้ตำแหน่งปัจจุบัน</p>'}`,
   method: () => `<h3>วิธีคิดคะแนนและข้อจำกัด</h3><h4>คะแนนรวม 0–100 มาจาก 5 ด้าน</h4><ul>${FACTORS.map((F) => `<li><b>${F.label}</b> น้ำหนัก ${Math.round(WEIGHTS[F.k] * 100)}% · ${F.hint}</li>`).join('')}</ul><p>แต่ละด้านคิดเป็น 0–100 แล้วถ่วงน้ำหนักรวมกัน ด้านที่ไม่มีข้อมูลจะถูกตัดออก และน้ำหนักของด้านที่เหลือจะปรับให้รวมเป็น 100%</p><h4>แหล่งข้อมูล</h4><p>ร้านค้า สถานที่ และสถานีรถไฟฟ้า มาจาก OpenStreetMap ซึ่งอาสาสมัครช่วยกันบันทึก บางพื้นที่จึงมีร้านไม่ครบหรือข้อมูลไม่ทันสมัย</p><h4>ข้อจำกัดที่ควรรู้</h4><ul><li>ยังไม่มีเรตติ้งและรีวิวของลูกค้า จึงยังคำนวณด้าน "ช่องว่างคุณภาพ" ไม่ได้</li><li>ไม่รวมค่าเช่า ปริมาณคนเดินผ่านจริง ที่จอดรถ ทิศทางการจราจร กำลังซื้อ และกฎผังเมือง</li><li>สูตรเป็นแบบจำลองเบื้องต้น ยังไม่ได้ทดสอบเทียบกับผลประกอบการของร้านจริง</li><li>คะแนนสูงไม่ได้รับประกันว่าธุรกิจจะประสบความสำเร็จ และคะแนนต่ำไม่ได้แปลว่าไม่ควรเปิด</li></ul><p>ใช้ผลนี้เป็นจุดตั้งต้นในการเลือกทำเล แล้วไปสำรวจพื้นที่จริงทั้งวันธรรมดาและวันหยุดก่อนตัดสินใจ</p>`,
   biz: () => `<h3>เลือกประเภทธุรกิจ</h3>${bizPicker()}`,
   license: () => `<h3>ฟังก์ชันเชิงลึก <span class="badge">PRO</span></h3>${licenseStatus()}
     <h4>ฟรีตลอด</h4><ul><li>วิเคราะห์ทำเล คะแนน 5 ด้าน คู่แข่ง แหล่งดึงคน เทียบ 3 ทำเล ค้นหา ตำแหน่งปัจจุบัน และคัดลอกสรุปไปวางใน LINE</li></ul>
-    <h4>PRO (ทดลองฟรี ${CONFIG.TRIAL_DAYS} วัน)</h4><ul><li>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด เทียบ 7 ประเภท</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul>
-    <h4>ราคา</h4><p><b>${esc(CONFIG.PRICES)}</b></p>
-    ${ENT.kind === 'ended' || ENT.kind === 'expired' ? payBlock() : ENT.kind === 'trial' ? `<p>ตอนนี้ใช้ได้ฟรีเต็มที่ ไม่ต้องทำอะไรเลย ครบ ${ENT.daysLeft} วันแล้วค่อยชำระ</p>` : ''}
+    <h4>PRO ใช้วิเคราะห์อะไรได้บ้าง</h4>${PRO_LIST()}
+    ${ENT.active ? '<p class="small muted">ขอบคุณที่ใช้ PRO ค่ะ ใช้งานได้เต็มที่จนถึงวันที่ระบุด้านบน</p>' : `<h4>เลือกแพ็กเกจ</h4>${planPicker()}`}
     ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
+  promo: () => `<h3>อยากรู้ลึกกว่านี้ไหม?</h3><p>ผลวิเคราะห์พื้นฐานใช้ฟรีตลอด ถ้าต้องการข้อมูลเพิ่ม PRO ช่วยได้:</p>${PRO_LIST()}
+    <div class="dlg-actions">${trialEligible() ? '<button class="dlg-primary" data-act="plan-open" data-v="trial">ลองใช้ 7 วัน 69 บาท</button>' : ''}<button class="${trialEligible() ? 'dlg-ghost' : 'dlg-primary'}" data-act="plan-open" data-v="month">PRO 690 บาท/เดือน</button><button class="dlg-ghost" data-act="close">ไว้ก่อน</button></div>`,
+  radius: () => `<h3>กำหนดรัศมีเอง</h3><p class="muted small">ตั้งได้ 100 เมตร ถึง ${CONFIG.MAX_RADIUS / 1000} กิโลเมตร รัศมีกว้างข้อมูลเยอะ อาจใช้เวลานานขึ้น</p><form class="custom" data-form="radius"><input name="km" type="number" inputmode="decimal" min="0.1" max="${CONFIG.MAX_RADIUS / 1000}" step="0.1" value="${+(S.radius / 1000).toFixed(1)}" aria-label="รัศมีเป็นกิโลเมตร"> <span>กม.</span><button type="submit">ใช้รัศมีนี้</button></form>`,
   contrib: contribForm,
   install: installDialog,
 };
@@ -1013,6 +1129,12 @@ function applyCustom(text) {
   if (hit) { S.biz = hit[1]; toast(`"${text}" ตรงกับหมวด ${BIZ[hit[1]].label} จึงใช้หมวดนี้วิเคราะห์`); }
   else { S.custom = text; S.biz = 'custom'; toast(`วิเคราะห์ "${text}" โดยนับคู่แข่งจากชื่อร้านที่มีคำนี้`); }
 }
+function setRadius(m) {
+  S.radius = clamp(Math.round(m / 10) * 10, 100, CONFIG.MAX_RADIUS);
+  refresh();
+  const p = S.pins[S.active];
+  if (p && S.radius > 1000) map.fitBounds(L.circle([p.lat, p.lng], { radius: S.radius }).getBounds(), { padding: [24, 24], maxZoom: 16 });
+}
 const needPro = () => { if (ENT.active) return false; openDlg('license'); return true; };
 async function copyToClipboard(txt, okMsg) {
   try { await navigator.clipboard.writeText(txt); toast(okMsg); } catch { window.prompt('คัดลอกข้อความนี้', txt); }
@@ -1025,7 +1147,9 @@ document.addEventListener('click', (e) => {
   const v = t.dataset.v;
   switch (t.dataset.act) {
     case 'biz': S.biz = v; closeDlg(); refresh(); break;
-    case 'radius': S.radius = +v; refresh(); break;
+    case 'radius': setRadius(+v); break;
+    case 'plan': payPlan = v; openDlg('license'); break;
+    case 'plan-open': payPlan = v; openDlg('license'); break;
     case 'pin': S.active = v; if (S.pins[v]) map.flyTo([S.pins[v].lat, S.pins[v].lng], Math.max(map.getZoom(), 15), { duration: .6 }); renderAll(); break;
     case 'ex': { const x = EXAMPLES[+v]; showMap(); placePin({ lat: x[1], lng: x[2] }, x[0]); map.flyTo([x[1], x[2]], 16, { duration: .8 }); break; }
     case 'pickview': S.active = v; S.tab = 'analysis'; renderAll(); break;
@@ -1057,7 +1181,6 @@ document.addEventListener('click', (e) => {
       setTimeout(() => window.print(), 150);
       break;
     }
-    case 'aiprompt': if (!needPro()) copyToClipboard(aiPrompt(), 'คัดลอกคำสั่งแล้ว นำไปวางใน ChatGPT, Claude หรือ Gemini ได้เลย'); break;
     case 'contrib-copy': { const txt = contribText(); if (txt) copyToClipboard(txt, 'คัดลอกข้อความแล้ว ส่งให้ทีมงานทาง LINE ได้เลย'); break; }
     case 'contrib-send': { const txt = contribText(); if (txt) { window.open('https://line.me/R/share?text=' + encodeURIComponent(txt), '_blank', 'noopener'); toast('เปิด LINE แล้ว เลือกทีมงานเพื่อส่ง'); } break; }
   }
@@ -1066,7 +1189,12 @@ document.addEventListener('submit', async (e) => {
   const f = e.target.closest('[data-form]');
   if (!f) return;
   e.preventDefault();
-  if (f.dataset.form === 'custom') {
+  if (f.dataset.form === 'radius') {
+    const km = parseFloat(f.elements.km.value);
+    if (!(km >= 0.1)) { toast('ใส่รัศมีเป็นกิโลเมตร เช่น 1.5'); return; }
+    closeDlg(); setRadius(km * 1000);
+    if (km * 1000 > CONFIG.MAX_RADIUS) toast(`รัศมีสูงสุด ${CONFIG.MAX_RADIUS / 1000} กม. ปรับให้แล้ว`);
+  } else if (f.dataset.form === 'custom') {
     const text = f.elements.c.value.trim();
     if (!text) { toast('พิมพ์ประเภทร้านที่ต้องการก่อน'); return; }
     applyCustom(text); closeDlg(); refresh();
@@ -1082,12 +1210,12 @@ document.addEventListener('submit', async (e) => {
   }
 });
 window.addEventListener('resize', () => map.invalidateSize());
-setInterval(() => document.querySelectorAll('.elapsed').forEach((el) => { el.textContent = `(${Math.round((Date.now() - Number(el.dataset.since)) / 1000)} วินาที)`; }), 1000);
+setInterval(() => document.querySelectorAll('.elapsed').forEach((el) => { el.textContent = secs(Number(el.dataset.since), !!el.dataset.plain); }), 1000);
 
 if (matchMedia('(max-width:900px)').matches) { $('#mBiz').style.display = ''; $('#mNav').style.display = ''; }
 matchMedia('(max-width:900px)').addEventListener('change', (m) => { $('#mBiz').style.display = m.matches ? '' : 'none'; $('#mNav').style.display = m.matches ? '' : 'none'; setTimeout(() => map.invalidateSize(), 50); });
 renderAll();
-initEnt().then(handleUnlockLink);
+initEnt().then(handleUnlockLink).then(handlePaidReturn);
 window.addEventListener('hashchange', handleUnlockLink); // an unlock link tapped while the app is already open
 document.addEventListener('visibilitychange', () => { if (!document.hidden) initEnt(); }); // back from the banking app: re-check payment
 reverse(S.pins.A);
