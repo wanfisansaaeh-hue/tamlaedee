@@ -277,7 +277,7 @@ const CONFIG = {
   PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ 7 วัน 69 บาท'/*END_PRICES*/,
   PLANS: { trial: { name: 'ทดลองใช้ 7 วัน', price: 69, days: 7 }, month: { name: 'PRO รายเดือน', price: 690, days: 30 } },
   // Hosted card-payment links (Stripe / gateway). Success redirect must be: <app url>?paid=trial&k=<token> (see payment-setup-th.md). Empty = card not open yet, PromptPay QR is shown instead.
-  PAY_URL: { trial: '', month: '' },
+  PAY_URL: { trial: 'https://buy.stripe.com/aFa3cu9ll2YOgHDfIS6sw00', month: 'https://buy.stripe.com/aFa3cu8hheHw3UR1S26sw01' },
   // SHA-256 of the secret tokens in those redirect URLs; the app unlocks only when the returned token matches
   PAY_HASH: { trial: ['0f9e26bb85510c383e4df31e6e40505a53b6337a5360dd6b99656e230e4b4dde'], month: ['93e64fde395d2d55b3bcf33546e63a719a4dcdeb6ef5c86a2d5ce408ffd7ff63'] },
   PROMPTPAY: /*PROMPTPAY*/'0857983066'/*END_PROMPTPAY*/, // owner's PromptPay phone number (10 digits) or tax ID; empty = payment not open yet
