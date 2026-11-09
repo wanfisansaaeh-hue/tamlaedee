@@ -277,11 +277,11 @@ const CONFIG = {
   CONTACT: /*CONTACT*/'LINE @097wgyfr'/*END_CONTACT*/,
   LINE_URL: /*LINE_URL*/'https://line.me/R/ti/p/@097wgyfr'/*END_LINE_URL*/,
   PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ 7 วัน 69 บาท'/*END_PRICES*/,
-  PLANS: { trial: { name: 'ทดลองใช้ 7 วัน', price: 69, days: 7 }, month: { name: 'PRO รายเดือน', price: 690, days: 30 } },
+  PLANS: { trial: { name: 'ทดลองใช้ 7 วัน', price: 69, days: 7 }, month: { name: 'PRO รายเดือน', price: 690, days: 30 }, owner: { name: 'เจ้าของ', price: 0, days: 36500 } },
   // Hosted card-payment links (Stripe / gateway). Success redirect must be: <app url>?paid=trial&k=<token> (see payment-setup-th.md). Empty = card not open yet, PromptPay QR is shown instead.
   PAY_URL: { trial: 'https://buy.stripe.com/aFa3cu9ll2YOgHDfIS6sw00', month: 'https://buy.stripe.com/aFa3cu8hheHw3UR1S26sw01' },
   // SHA-256 of the secret tokens in those redirect URLs; the app unlocks only when the returned token matches
-  PAY_HASH: { trial: ['0f9e26bb85510c383e4df31e6e40505a53b6337a5360dd6b99656e230e4b4dde'], month: ['93e64fde395d2d55b3bcf33546e63a719a4dcdeb6ef5c86a2d5ce408ffd7ff63'] },
+  PAY_HASH: { trial: ['0f9e26bb85510c383e4df31e6e40505a53b6337a5360dd6b99656e230e4b4dde'], month: ['93e64fde395d2d55b3bcf33546e63a719a4dcdeb6ef5c86a2d5ce408ffd7ff63'], owner: ['725462e147540a36aaba7085eb7592581d5b992a910723d7029519e140e1b4da'] },
   PROMPTPAY: /*PROMPTPAY*/'0857983066'/*END_PROMPTPAY*/, // owner's PromptPay phone number (10 digits) or tax ID; empty = payment not open yet
   MAX_RADIUS: 5000,
   REWARD: true, // thank contributors of real outcomes with extra PRO days
@@ -391,7 +391,7 @@ function cardUntil() {
 }
 function saveCard(until, plan) {
   lsSet(LSK.card, String(until)); lsSet(LSK.plan, plan);
-  try { document.cookie = `tl-card=${until}.${plan}; max-age=31536000; path=/; SameSite=Lax; Secure`; } catch { /* cookies blocked */ }
+  try { document.cookie = `tl-card=${until}.${plan}; max-age=34560000; path=/; SameSite=Lax; Secure`; } catch { /* cookies blocked */ }
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch { /* not supported */ }
 }
 const trialEligible = () => !lsGet(LSK.trialUsed) && ENT.kind === 'free';
@@ -420,7 +420,7 @@ async function handlePaidReturn() {
 }
 // "restore": paste the code (or the whole return link) shown after paying, e.g. when payment opened in a different in-app window
 async function restorePaid(raw) {
-  const m = /paid=(trial|month)&k=([\w-]+)/.exec(raw) || /TLP\.(trial|month)\.([\w-]+)/.exec(raw);
+  const m = /paid=(trial|month|owner)&k=([\w-]+)/.exec(raw) || /TLP\.(trial|month|owner)\.([\w-]+)/.exec(raw);
   if (!m) return 0;
   return applyPaid(m[1], m[2]);
 }
