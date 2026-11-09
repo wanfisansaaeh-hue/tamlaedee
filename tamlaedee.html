@@ -397,19 +397,32 @@ function saveCard(until, plan) {
 const trialEligible = () => !lsGet(LSK.trialUsed) && ENT.kind === 'free';
 const sha256Hex = async (s) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), (b) => b.toString(16).padStart(2, '0')).join('');
 // Hosted card page sends the customer back to ?paid=<plan>&k=<secret>; a matching secret unlocks PRO at once, no approval.
-async function handlePaidReturn() {
-  const sp = new URLSearchParams(location.search), plan = sp.get('paid'), k = sp.get('k');
-  if (!plan) return;
-  history.replaceState(null, '', location.pathname);
+let lastPaid = null; // {plan, k} of the payment just confirmed, shown as a restore code
+async function applyPaid(plan, k) {
   const P = CONFIG.PLANS[plan];
-  if (!P || !k || !(self.crypto && crypto.subtle) || !(CONFIG.PAY_HASH[plan] || []).includes(await sha256Hex(k))) { toast('ตรวจการชำระเงินไม่สำเร็จ หากตัดบัตรแล้วโปรดแจ้งทีมงาน', 9000); return; }
+  if (!P || !k || !(self.crypto && crypto.subtle) || !(CONFIG.PAY_HASH[plan] || []).includes(await sha256Hex(k))) return 0;
   // every payment is honoured: a repeat payment simply adds more days
   const base = Math.max(Date.now(), cardUntil()), d = new Date(base + P.days * DAY);
   const until = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
   saveCard(until, plan);
   if (plan === 'trial') lsSet(LSK.trialUsed, '1');
-  closeDlg(); await initEnt();
-  toast(`ชำระเงินสำเร็จ ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(until)}`, 8000);
+  return until;
+}
+async function handlePaidReturn() {
+  const sp = new URLSearchParams(location.search), plan = sp.get('paid'), k = sp.get('k');
+  if (!plan) return;
+  history.replaceState(null, '', location.pathname);
+  const until = await applyPaid(plan, k);
+  if (!until) { toast('ตรวจการชำระเงินไม่สำเร็จ หากตัดบัตรแล้วโปรดแจ้งทีมงาน', 9000); return; }
+  lastPaid = { plan, k };
+  await initEnt();
+  openDlg('paidok');
+}
+// "restore": paste the code (or the whole return link) shown after paying, e.g. when payment opened in a different in-app window
+async function restorePaid(raw) {
+  const m = /paid=(trial|month)&k=([\w-]+)/.exec(raw) || /TLP\.(trial|month)\.([\w-]+)/.exec(raw);
+  if (!m) return 0;
+  return applyPaid(m[1], m[2]);
 }
 // friendly nudge for free users: once a day, right after they have seen a result
 function maybePromo() {
@@ -1053,7 +1066,7 @@ function planPicker() {
   const cards = ['trial', 'month'].filter((k) => k !== 'trial' || trialEligible()).map((k) => `<button type="button" class="plancard" data-act="plan" data-v="${k}" aria-pressed="${plan === k}"><b>${CONFIG.PLANS[k].name}</b><span class="num">${CONFIG.PLANS[k].price} บาท</span><small>${k === 'trial' ? 'ใช้ PRO เต็มที่ 7 วัน ชำระครั้งเดียว' : 'ใช้ PRO ต่อเนื่อง 30 วัน'}</small></button>`).join('');
   const url = CONFIG.PAY_URL[plan];
   const pay = url
-    ? `<a class="dlg-primary paybtn" href="${esc(url)}">ชำระด้วยบัตร ${P.price} บาท</a><p class="small muted">กรอกข้อมูลบัตรในหน้าชำระเงินที่ปลอดภัยของผู้ให้บริการ (แอพนี้ไม่เห็นเลขบัตร) ตัดบัตรสำเร็จ PRO เปิดใช้อัตโนมัติ ไม่ต้องรออนุมัติ</p>`
+    ? `<a class="dlg-primary paybtn" href="${esc(url + (url.includes('?') ? '&' : '?') + 'client_reference_id=' + deviceId())}">ชำระด้วยบัตร ${P.price} บาท</a><p class="small muted">กรอกข้อมูลบัตรในหน้าชำระเงินที่ปลอดภัยของผู้ให้บริการ (แอพนี้ไม่เห็นเลขบัตร) ตัดบัตรสำเร็จ PRO เปิดใช้อัตโนมัติ ไม่ต้องรออนุมัติ</p>`
     : `<p class="small muted">การชำระด้วยบัตรกำลังเปิดให้บริการเร็วๆ นี้ ตอนนี้ชำระผ่านพร้อมเพย์ได้ทันที</p>${payBlock(P.price)}`;
   return `<div class="plans">${cards}</div>${pay}`;
 }
@@ -1143,9 +1156,13 @@ const DLG = {
     <h4>ฟรีตลอด</h4><ul><li>วิเคราะห์ทำเล คะแนน 5 ด้าน คู่แข่ง แหล่งดึงคน เทียบ 3 ทำเล ค้นหา ตำแหน่งปัจจุบัน และคัดลอกสรุปไปวางใน LINE</li></ul>
     <h4>PRO ใช้วิเคราะห์อะไรได้บ้าง</h4>${PRO_LIST()}
     ${ENT.active ? '<p class="small muted">ขอบคุณที่ใช้ PRO ค่ะ ใช้งานได้เต็มที่จนถึงวันที่ระบุด้านบน</p>' : `<h4>เลือกแพ็กเกจ</h4>${planPicker()}`}
+    ${ENT.active ? '' : '<h4>จ่ายแล้ว? กู้คืนสิทธิ์</h4><form class="custom" data-form="restore"><input name="code" type="text" placeholder="วางรหัสกู้คืนสิทธิ์ที่นี่" autocomplete="off" aria-label="รหัสกู้คืนสิทธิ์"><button type="submit">กู้คืน</button></form><p class="small err" id="restoreErr"></p>'}
     ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
   promo: () => `<h3>อยากรู้ลึกกว่านี้ไหม?</h3><p>ผลวิเคราะห์พื้นฐานใช้ฟรีตลอด ถ้าต้องการข้อมูลเพิ่ม PRO ช่วยได้:</p>${PRO_LIST()}
     <div class="dlg-actions">${trialEligible() ? '<button class="dlg-primary" data-act="plan-open" data-v="trial">ลองใช้ 7 วัน 69 บาท</button>' : ''}<button class="${trialEligible() ? 'dlg-ghost' : 'dlg-primary'}" data-act="plan-open" data-v="month">PRO 690 บาท/เดือน</button><button class="dlg-ghost" data-act="close">ไว้ก่อน</button></div>`,
+  paidok: () => `<h3>ชำระเงินสำเร็จ</h3><p>ปลดล็อก PRO แล้ว ใช้งานได้ถึง <b>${fmtDate(ENT.until || Date.now())}</b></p>
+    <p class="small muted">ถ้ากลับไปที่แอพแล้วยังไม่ขึ้น PRO (เช่นหน้าชำระเงินเปิดเป็นหน้าต่างแยก) ให้กดคัดลอกรหัสนี้ แล้วไปวางในช่อง "จ่ายแล้ว? กู้คืนสิทธิ์" ที่หน้าต่าง PRO</p>
+    <div class="dlg-actions"><button class="dlg-primary" data-act="copyrestore">คัดลอกรหัสกู้คืนสิทธิ์</button><button class="dlg-ghost" data-act="close">ปิด</button></div>`,
   radius: () => `<h3>กำหนดรัศมีเอง</h3><p class="muted small">ตั้งได้ 100 เมตร ถึง ${CONFIG.MAX_RADIUS / 1000} กิโลเมตร รัศมีกว้างข้อมูลเยอะ อาจใช้เวลานานขึ้น</p><form class="custom" data-form="radius"><input name="km" type="number" inputmode="decimal" min="0.1" max="${CONFIG.MAX_RADIUS / 1000}" step="0.1" value="${+(S.radius / 1000).toFixed(1)}" aria-label="รัศมีเป็นกิโลเมตร"> <span>กม.</span><button type="submit">ใช้รัศมีนี้</button></form>`,
   contrib: contribForm,
   install: installDialog,
@@ -1202,6 +1219,7 @@ document.addEventListener('click', (e) => {
     case 'accept': lsSet(LSK.gps, '1'); closeDlg(); runLocate(); break;
     case 'withdraw': lsSet(LSK.gps, null); closeDlg(); toast('ถอนความยินยอมใช้ตำแหน่งแล้ว'); break;
     case 'licclear': lsSet(LSK.lic, null); closeDlg(); initEnt(); toast('ยกเลิกการปลดล็อกบนเครื่องนี้แล้ว'); break;
+    case 'copyrestore': if (lastPaid) copyToClipboard(`TLP.${lastPaid.plan}.${lastPaid.k}`, 'คัดลอกรหัสแล้ว เก็บไว้ใช้กู้คืนสิทธิ์ได้'); break;
     case 'copypp': copyToClipboard(CONFIG.PROMPTPAY, 'คัดลอกเลขพร้อมเพย์แล้ว นำไปโอนในแอพธนาคารได้เลย'); break;
     case 'copyid': copyToClipboard(deviceId(), 'คัดลอกรหัสอ้างอิงแล้ว วางในช่องบันทึกช่วยจำตอนโอนได้เลย'); break;
     case 'install-dismiss': lsSet(LSK.installDismissed, '1'); renderHeader(); break;
@@ -1227,7 +1245,11 @@ document.addEventListener('submit', async (e) => {
   const f = e.target.closest('[data-form]');
   if (!f) return;
   e.preventDefault();
-  if (f.dataset.form === 'radius') {
+  if (f.dataset.form === 'restore') {
+    const until = await restorePaid(f.elements.code.value.trim());
+    if (!until) { const er = $('#restoreErr'); if (er) er.textContent = 'รหัสไม่ถูกต้อง ลองคัดลอกใหม่อีกครั้ง'; return; }
+    closeDlg(); await initEnt(); toast(`กู้คืนสิทธิ์แล้ว PRO ใช้ได้ถึง ${fmtDate(until)}`, 7000);
+  } else if (f.dataset.form === 'radius') {
     const km = parseFloat(f.elements.km.value);
     if (!(km >= 0.1)) { toast('ใส่รัศมีเป็นกิโลเมตร เช่น 1.5'); return; }
     closeDlg(); setRadius(km * 1000);
