@@ -201,6 +201,11 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
 .install-bar button{border:0;background:none;color:var(--pinA);font-weight:600;font-size:13px;padding:0 4px;text-decoration:underline;text-underline-offset:2px}
 .install-bar button[data-act="install-dismiss"]{text-decoration:none;color:var(--muted);font-size:15px}
 
+.pay{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:start}
+.pay ol{margin:0;padding-left:18px;display:grid;gap:6px}
+.qr svg{display:block;width:150px;height:150px;background:#fff;border-radius:8px;border:1px solid var(--line)}
+@media (max-width:460px){.pay{grid-template-columns:1fr}.qr{justify-self:center}}
+
 /* printable report */
 #report{display:none}
 @page{margin:14mm}
@@ -247,6 +252,7 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
 <noscript><p style="padding:16px">ต้องเปิด JavaScript เพื่อใช้งานแอพนี้</p></noscript>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 (() => {
 'use strict';
@@ -256,7 +262,9 @@ const CONFIG = {
   PUBLIC_KEY: /*PUBLIC_KEY*/{"kty":"EC","crv":"P-256","x":"0-1pqcZF_4IAwrk4gTwe8xfY_C3IX9xY5P0TeYyHiSE","y":"WLXbS0fVN2yioXHbeilr8ipv-T885iHfojMjP7eRt3U"}/*END_PUBLIC_KEY*/,
   CONTACT: /*CONTACT*/'LINE @097wgyfr'/*END_CONTACT*/,
   LINE_URL: /*LINE_URL*/'https://line.me/R/ti/p/@097wgyfr'/*END_LINE_URL*/,
-  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ฟรี 7 วัน · สั่งซื้อทาง LINE'/*END_PRICES*/,
+  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ฟรี 7 วัน'/*END_PRICES*/,
+  PRICE: 690, // baht per month, put into the PromptPay QR
+  PROMPTPAY: /*PROMPTPAY*/'0857983066'/*END_PROMPTPAY*/, // owner's PromptPay phone number (10 digits) or tax ID; empty = payment not open yet
   TRIAL_DAYS: 7,
   REWARD: true, // thank contributors of real outcomes with extra PRO days
 };
@@ -269,7 +277,7 @@ const DAY = 864e5;
 const fmtDate = (ms) => new Date(ms).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* storage blocked: asked again next time */ } };
-const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1', installDismissed: 'tl-install-dismissed-v1' };
+const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1', installDismissed: 'tl-install-dismissed-v1', paid: 'tl-paid-until-v1', device: 'tl-device-v1' };
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 let deferredInstall = null; // Android Chrome's one-tap install prompt, when it offers one
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
@@ -317,14 +325,45 @@ async function verifyLicense(code) {
   } catch { return null; }
 }
 
+// A short reference for this phone/browser, shown at payment time so the owner knows whom to switch on.
+let _device = null;
+function deviceId() {
+  if (_device) return _device;
+  _device = lsGet(LSK.device);
+  if (!_device) {
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    _device = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => A[b % A.length]).join('');
+    lsSet(LSK.device, _device);
+  }
+  return _device;
+}
+
+// The owner lists paid references in activations.json, e.g. {"K7M2QX": "2026-12-31"}; the app reads it when opened.
+async function fetchActivation() {
+  try {
+    const r = await fetch(`activations.json?t=${Math.floor(Date.now() / 60000)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error('no list');
+    const until = (await r.json())[deviceId()];
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(until || ''));
+    const ms = m ? new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 59, 999).getTime() : null;
+    lsSet(LSK.paid, ms ? String(ms) : null);
+    return ms;
+  } catch {
+    const kept = Number(lsGet(LSK.paid)); // offline: keep the last known paid date
+    return kept > 0 ? kept : null;
+  }
+}
+
 async function initEnt() {
   let start = lsGet(LSK.trial);
   if (!start || isNaN(Date.parse(start))) { start = new Date().toISOString().slice(0, 10); lsSet(LSK.trial, start); }
   const left = Math.ceil((Date.parse(start) + CONFIG.TRIAL_DAYS * DAY - Date.now()) / DAY);
   const lic = await verifyLicense(lsGet(LSK.lic));
+  const paidUntil = await fetchActivation();
   if (lic && Date.now() <= lic.expMs) ENT = { active: true, kind: 'paid', until: lic.expMs, id: lic.id };
+  else if (paidUntil && Date.now() <= paidUntil) ENT = { active: true, kind: 'paid', until: paidUntil };
   else if (left > 0) ENT = { active: true, kind: 'trial', daysLeft: Math.min(left, CONFIG.TRIAL_DAYS) };
-  else ENT = { active: false, kind: lic ? 'expired' : 'ended' };
+  else ENT = { active: false, kind: (lic || paidUntil) ? 'expired' : 'ended' };
   renderAll();
 }
 
@@ -878,7 +917,7 @@ function contribForm() {
   <label>ผลประกอบการเทียบที่คาดไว้<select name="perf"><option>ต่ำกว่าที่คาด</option><option>ตามที่คาด</option><option>สูงกว่าที่คาด</option><option>ไม่ระบุ</option></select></label>
   <label class="check"><input type="checkbox" name="consent"><span>ฉันยินยอมให้ส่งข้อมูลนี้ (ตำแหน่งแบบหยาบประมาณ 100 ม. ประเภทร้าน คะแนนที่แอพให้ และผลจริงด้านบน ไม่มีชื่อหรือเบอร์โทร) ให้ทีมงานเพื่อปรับปรุงสูตรคะแนน</span></label>
   <div class="dlg-actions"><button type="button" class="dlg-ghost" data-act="contrib-copy">คัดลอกข้อความ</button><button type="button" class="dlg-primary" data-act="contrib-send">ส่งทาง LINE</button></div></form>
-  ${CONFIG.REWARD ? '<p class="muted small">เป็นการขอบคุณ ทีมงานจะส่งลิงก์ใช้ PRO ฟรีเพิ่มให้ทาง LINE</p>' : ''}`;
+  ${CONFIG.REWARD ? '<p class="muted small">เป็นการขอบคุณ ทีมงานจะเปิดใช้ PRO ฟรีเพิ่มให้ตามรหัสอ้างอิงในข้อความ</p>' : ''}`;
 }
 function contribText() {
   const f = $('.dlg form[data-form="contrib"]');
@@ -886,8 +925,39 @@ function contribText() {
   if (!f.elements.consent.checked) { toast('ติ๊กยินยอมก่อนจึงส่งได้'); return null; }
   const k = f.elements.pin.value, p = S.pins[k], e = entry(k), b = bizNow();
   return ['[ทำเลดี · ส่งผลจริง]', `ทำเล(ปัดเศษ ~100 ม.): ${p.lat.toFixed(3)}, ${p.lng.toFixed(3)}`, `ประเภทธุรกิจ: ${b.label}`,
-    `คะแนนที่แอพให้: ${e.state === 'ok' ? e.a.total : '-'} (รัศมี ${S.radius} ม.)`, e.state === 'ok' ? 'รายด้าน: ' + FACTORS.filter((F) => e.a.f[F.k] != null).map((F) => `${F.label} ${e.a.f[F.k]}`).join(', ') : '',
+    `รหัสอ้างอิง: ${deviceId()}`, `คะแนนที่แอพให้: ${e.state === 'ok' ? e.a.total : '-'} (รัศมี ${S.radius} ม.)`, e.state === 'ok' ? 'รายด้าน: ' + FACTORS.filter((F) => e.a.f[F.k] != null).map((F) => `${F.label} ${e.a.f[F.k]}`).join(', ') : '',
     `ผลจริง: ${f.elements.outcome.value}`, `เปิดมาแล้ว: ${f.elements.months.value || '-'} เดือน`, `สถานะ: ${f.elements.status.value}`, `ผลประกอบการ: ${f.elements.perf.value}`, 'ยินยอมให้ใช้ข้อมูลนี้ปรับปรุงสูตร: ใช่'].filter(Boolean).join('\n');
+}
+
+/* PromptPay QR (standard EMVCo/Bank of Thailand format) */
+const tlv = (id, v) => id + String(v.length).padStart(2, '0') + v;
+function crc16(s) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < s.length; i++) {
+    crc ^= s.charCodeAt(i) << 8;
+    for (let b = 0; b < 8; b++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+function promptpayPayload(id, amount) {
+  const digits = String(id).replace(/\D/g, '');
+  const target = digits.length <= 10 ? tlv('01', '0066' + digits.replace(/^0/, '')) : tlv('02', digits);
+  const body = tlv('00', '01') + tlv('01', '12') + tlv('29', tlv('00', 'A000000677010111') + target) + tlv('58', 'TH') + tlv('53', '764') + tlv('54', Number(amount).toFixed(2)) + '6304';
+  return body + crc16(body);
+}
+function qrSvg(text) {
+  if (typeof qrcode !== 'function') return '';
+  const q = qrcode(0, 'M');
+  q.addData(text);
+  q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
+function payBlock() {
+  const id = deviceId();
+  const idLine = `<p class="small muted">รหัสอ้างอิงของคุณ <b class="num">${id}</b></p>`;
+  if (!CONFIG.PROMPTPAY) return `<p>ระบบชำระเงินกำลังเตรียมเปิดให้บริการ ตอนนี้ใช้งานฟรีได้ตามช่วงทดลอง</p>${idLine}`;
+  const svg = qrSvg(promptpayPayload(CONFIG.PROMPTPAY, CONFIG.PRICE));
+  return `<div class="pay"><div class="qr">${svg}</div><ol><li>สแกน QR พร้อมเพย์ด้วยแอพธนาคาร (ใส่ยอด <b>${CONFIG.PRICE} บาท</b> ให้แล้ว) หรือ <button type="button" class="act" data-act="copypp">คัดลอกเลขพร้อมเพย์</button> ไปโอนเอง</li><li>ใส่ <b class="num">${id}</b> ในช่อง "บันทึกช่วยจำ" ตอนโอน <button type="button" class="act" data-act="copyid">คัดลอก</button></li><li>ทีมงานตรวจยอดแล้วเปิดใช้ให้ กลับมาเปิดแอพนี้ได้เลย ไม่ต้องกรอกอะไรอีก</li></ol></div>${idLine}`;
 }
 
 function installDialog() {
@@ -921,8 +991,7 @@ const DLG = {
     <h4>ฟรีตลอด</h4><ul><li>วิเคราะห์ทำเล คะแนน 5 ด้าน คู่แข่ง แหล่งดึงคน เทียบ 3 ทำเล ค้นหา ตำแหน่งปัจจุบัน และคัดลอกสรุปไปวางใน LINE</li></ul>
     <h4>PRO (ทดลองฟรี ${CONFIG.TRIAL_DAYS} วัน)</h4><ul><li>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด เทียบ 7 ประเภท</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul>
     <h4>ราคา</h4><p><b>${esc(CONFIG.PRICES)}</b></p>
-    ${ENT.kind === 'paid' ? '' : `<p>ชำระเงินแล้ว ทีมงานจะส่งลิงก์ให้ <b>กดครั้งเดียว PRO ก็เปิดใช้ได้ทันที</b> ไม่ต้องกรอกอะไร</p>${CONFIG.LINE_URL ? `<p><a class="dlg-primary" style="display:inline-block;text-decoration:none" href="${esc(CONFIG.LINE_URL)}" target="_blank" rel="noopener">ติดต่อ ${esc(CONFIG.CONTACT)} เพื่อชำระเงิน</a></p>` : `<p>ติดต่อ: <b>${esc(CONFIG.CONTACT)}</b></p>`}`}
-    ${isStandalone() && ENT.kind !== 'paid' ? `<form class="form" data-form="paste" style="margin-top:8px"><label for="pasteIn">เปิดจากไอคอนแอพ: วางลิงก์ปลดล็อกที่ได้รับจากทีมงาน (ลิงก์ที่กดในแชทจะเปิดในเบราว์เซอร์ ไม่ใช่ในแอพ)</label><input class="code-in" id="pasteIn" name="link" type="text" autocomplete="off" placeholder="https://…" spellcheck="false"><p class="err small" id="pasteErr"></p><div class="dlg-actions"><button type="submit" class="dlg-primary">ปลดล็อก</button></div></form>` : ''}
+    ${ENT.kind === 'paid' ? '' : payBlock()}
     ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
   contrib: contribForm,
   install: installDialog,
@@ -971,6 +1040,8 @@ document.addEventListener('click', (e) => {
     case 'accept': lsSet(LSK.gps, '1'); closeDlg(); runLocate(); break;
     case 'withdraw': lsSet(LSK.gps, null); closeDlg(); toast('ถอนความยินยอมใช้ตำแหน่งแล้ว'); break;
     case 'licclear': lsSet(LSK.lic, null); closeDlg(); initEnt(); toast('ยกเลิกการปลดล็อกบนเครื่องนี้แล้ว'); break;
+    case 'copypp': copyToClipboard(CONFIG.PROMPTPAY, 'คัดลอกเลขพร้อมเพย์แล้ว นำไปโอนในแอพธนาคารได้เลย'); break;
+    case 'copyid': copyToClipboard(deviceId(), 'คัดลอกรหัสอ้างอิงแล้ว วางในช่องบันทึกช่วยจำตอนโอนได้เลย'); break;
     case 'install-dismiss': lsSet(LSK.installDismissed, '1'); renderHeader(); break;
     case 'install-go': if (deferredInstall) { deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; closeDlg(); }); } break;
     case 'retry': { const p = S.pins[S.active]; if (p) cache.delete(ck(p)); refresh(); break; }
@@ -1018,6 +1089,7 @@ matchMedia('(max-width:900px)').addEventListener('change', (m) => { $('#mBiz').s
 renderAll();
 initEnt().then(handleUnlockLink);
 window.addEventListener('hashchange', handleUnlockLink); // an unlock link tapped while the app is already open
+document.addEventListener('visibilitychange', () => { if (!document.hidden) initEnt(); }); // back from the banking app: re-check payment
 reverse(S.pins.A);
 ensure('A');
 setTimeout(() => map.invalidateSize(), 100);
