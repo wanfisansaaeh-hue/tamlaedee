@@ -375,12 +375,24 @@ async function fetchActivation() {
 async function initEnt() {
   const lic = await verifyLicense(lsGet(LSK.lic));
   const paidUntil = await fetchActivation();
-  const card = Number(lsGet(LSK.card)) || 0; // set when a card payment returns to the app
+  const card = cardUntil(); // set when a card payment returns to the app
   const best = Math.max(lic ? lic.expMs : 0, paidUntil || 0, card);
   if (best && Date.now() <= best) ENT = { active: true, kind: 'paid', until: best, plan: card === best ? lsGet(LSK.plan) : '' };
   else ENT = { active: false, kind: best ? 'expired' : 'free' };
   renderAll();
   setTimeout(maybePromo, 1500);
+}
+// A paid period is kept in two places (storage + cookie) so clearing one does not lose it; also ask the browser not to evict our data.
+function cardUntil() {
+  const c = /(?:^|; )tl-card=(\d+)\.(\w*)/.exec(document.cookie || '');
+  const a = Number(lsGet(LSK.card)) || 0, b = c ? Number(c[1]) : 0;
+  if (b > a) { lsSet(LSK.card, String(b)); lsSet(LSK.plan, c[2]); }
+  return Math.max(a, b);
+}
+function saveCard(until, plan) {
+  lsSet(LSK.card, String(until)); lsSet(LSK.plan, plan);
+  try { document.cookie = `tl-card=${until}.${plan}; max-age=31536000; path=/; SameSite=Lax; Secure`; } catch { /* cookies blocked */ }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch { /* not supported */ }
 }
 const trialEligible = () => !lsGet(LSK.trialUsed) && ENT.kind === 'free';
 const sha256Hex = async (s) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -391,10 +403,10 @@ async function handlePaidReturn() {
   history.replaceState(null, '', location.pathname);
   const P = CONFIG.PLANS[plan];
   if (!P || !k || !(self.crypto && crypto.subtle) || !(CONFIG.PAY_HASH[plan] || []).includes(await sha256Hex(k))) { toast('ตรวจการชำระเงินไม่สำเร็จ หากตัดบัตรแล้วโปรดแจ้งทีมงาน', 9000); return; }
-  if (plan === 'trial' && lsGet(LSK.trialUsed)) { toast('เครื่องนี้ใช้สิทธิ์ทดลอง 7 วันไปแล้ว เลือกแพ็กเกจรายเดือนได้เลย', 9000); return; }
-  const base = Math.max(Date.now(), Number(lsGet(LSK.card)) || 0), d = new Date(base + P.days * DAY);
+  // every payment is honoured: a repeat payment simply adds more days
+  const base = Math.max(Date.now(), cardUntil()), d = new Date(base + P.days * DAY);
   const until = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
-  lsSet(LSK.card, String(until)); lsSet(LSK.plan, plan);
+  saveCard(until, plan);
   if (plan === 'trial') lsSet(LSK.trialUsed, '1');
   closeDlg(); await initEnt();
   toast(`ชำระเงินสำเร็จ ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(until)}`, 8000);
