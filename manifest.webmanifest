@@ -1,0 +1,16 @@
+{
+  "id": "./tamlaedee.html",
+  "name": "ทำเลดี",
+  "short_name": "ทำเลดี",
+  "description": "วิเคราะห์ทำเลก่อนเปิดร้าน",
+  "start_url": "./tamlaedee.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef0ec",
+  "theme_color": "#123a9e",
+  "lang": "th",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

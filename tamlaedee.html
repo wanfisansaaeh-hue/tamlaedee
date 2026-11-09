@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#123a9e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ทำเลดี">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
 <title>ทำเลดี</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
@@ -190,6 +196,11 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
 @media (max-width:1100px) and (min-width:901px){.tagline{display:none}}
 @media (prefers-reduced-motion:reduce){.ring-fg{transition:none}}
 
+.install-bar{align-items:center;gap:10px;padding:6px 16px;background:color-mix(in srgb,var(--pinA) 10%,var(--surface));border-bottom:1px solid var(--line);font-size:13px;flex:none;width:100%}
+.install-bar span{flex:1;min-width:0}
+.install-bar button{border:0;background:none;color:var(--pinA);font-weight:600;font-size:13px;padding:0 4px;text-decoration:underline;text-underline-offset:2px}
+.install-bar button[data-act="install-dismiss"]{text-decoration:none;color:var(--muted);font-size:15px}
+
 /* printable report */
 #report{display:none}
 @page{margin:14mm}
@@ -220,6 +231,7 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
   <div class="hlinks"><button data-act="dlg" data-v="method">วิธีคิดคะแนน</button><button data-act="dlg" data-v="privacy">ความเป็นส่วนตัว</button></div>
 </header>
 <div class="m-only m-biz" id="mBiz" style="display:none"></div>
+<div class="m-only install-bar" id="installBar" style="display:none"></div>
 <div class="main">
   <aside class="side" id="side"></aside>
   <section class="mapwrap">
@@ -257,7 +269,10 @@ const DAY = 864e5;
 const fmtDate = (ms) => new Date(ms).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* storage blocked: asked again next time */ } };
-const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1' };
+const LSK = { lic: 'tl-license-v1', trial: 'tl-trial-start-v1', gps: 'tl-gps-consent-v1', installDismissed: 'tl-install-dismissed-v1' };
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let deferredInstall = null; // Android Chrome's one-tap install prompt, when it offers one
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
 
 if (typeof L === 'undefined') {
   document.body.innerHTML = '<p style="padding:24px;font:16px sans-serif">โหลดแผนที่ไม่สำเร็จ แอพนี้ต้องเชื่อมต่ออินเทอร์เน็ต ลองรีเฟรชหน้านี้</p>';
@@ -267,7 +282,20 @@ if (typeof L === 'undefined') {
 /* ---------- logo ---------- */
 const LOGO = (size) => `<svg class="logo" width="${size}" height="${size}" viewBox="0 0 32 32" role="img" aria-label="ทำเลดี"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a5cf0"/><stop offset="1" stop-color="#123a9e"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 27.5S7.5 19 7.5 13a8.5 8.5 0 0 1 17 0c0 6-8.5 14.5-8.5 14.5Z" fill="#fff"/><rect x="11.4" y="13.2" width="2.3" height="3.6" rx=".7" fill="#7fa1ff"/><rect x="14.85" y="10.6" width="2.3" height="6.2" rx=".7" fill="#3f6df2"/><rect x="18.3" y="8" width="2.3" height="8.8" rx=".7" fill="#123a9e"/></svg>`;
 $('#brand').innerHTML = LOGO(36) + '<div class="wordmark"><h1>ทำเลดี</h1><p>LOCATION ANALYTICS</p></div>';
-document.head.insertAdjacentHTML('beforeend', '<link rel="icon" href="data:image/svg+xml,' + encodeURIComponent(LOGO(32).replace(' class="logo"', '').replace(/ role="img" aria-label="[^"]*"/, '')) + '">');
+const iconSvg = (size, rx) => LOGO(size).replace(' class="logo"', '').replace(/ role="img" aria-label="[^"]*"/, '').replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ').replace('rx="9"', `rx="${rx}"`);
+document.head.insertAdjacentHTML('beforeend', '<link rel="icon" href="data:image/svg+xml,' + encodeURIComponent(iconSvg(32, 9)) + '">');
+{ // iPhone home-screen icon: iOS needs a PNG, so draw one from the logo (square; iOS rounds the corners itself)
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 180;
+    c.getContext('2d').drawImage(img, 0, 0, 180, 180);
+    const l = document.createElement('link');
+    l.rel = 'apple-touch-icon'; l.sizes = '180x180'; l.href = c.toDataURL('image/png');
+    document.head.appendChild(l);
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg(180, 0));
+}
 
 /* ---------- PRO access: 30-day trial + signed license codes (checked in the browser) ---------- */
 let ENT = { active: false, kind: 'loading' };
@@ -645,7 +673,7 @@ function bizPicker() {
 }
 const radiusSeg = () => `<div class="seg" role="group" aria-label="รัศมี">${[300, 500, 1000].map((m) => `<button data-act="radius" data-v="${m}" aria-pressed="${S.radius === m}">${m >= 1000 ? '1 กม.' : m + ' ม.'}</button>`).join('')}</div>`;
 const legend = (b) => `<div class="legend"><span><i class="lg c"></i>คู่แข่ง (${esc(b.short)})</span><span><i class="lg g"></i>แหล่งดึงคน</span><span><i class="lg k"></i>ธุรกิจที่ส่งเสริม</span></div>`;
-const legalLinks = () => `<div class="legal-links"><p>ผลวิเคราะห์เป็นข้อมูลประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางธุรกิจหรือการลงทุน ควรสำรวจพื้นที่จริงก่อนตัดสินใจ</p><div><button data-act="dlg" data-v="method">วิธีคิดคะแนนและข้อจำกัด</button><button data-act="dlg" data-v="privacy">ความเป็นส่วนตัว</button><button data-act="dlg" data-v="contrib">ส่งผลจริงช่วยปรับปรุงสูตร</button></div></div>`;
+const legalLinks = () => `<div class="legal-links"><p>ผลวิเคราะห์เป็นข้อมูลประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางธุรกิจหรือการลงทุน ควรสำรวจพื้นที่จริงก่อนตัดสินใจ</p><div><button data-act="dlg" data-v="method">วิธีคิดคะแนนและข้อจำกัด</button><button data-act="dlg" data-v="privacy">ความเป็นส่วนตัว</button><button data-act="dlg" data-v="contrib">ส่งผลจริงช่วยปรับปรุงสูตร</button><button data-act="dlg" data-v="install">ติดตั้งเป็นแอพบนมือถือ</button></div></div>`;
 
 function renderSide() {
   const b = bizNow();
@@ -732,6 +760,10 @@ function renderHeader() {
   const c = $('#proChip');
   c.textContent = entLabel();
   c.classList.toggle('on', ENT.active);
+  const bar = $('#installBar');
+  const show = !isStandalone() && lsGet(LSK.installDismissed) !== '1' && matchMedia('(max-width:900px)').matches;
+  bar.style.display = show ? '' : 'none';
+  if (show) bar.innerHTML = '<span>ติดตั้งทำเลดีเป็นแอพบนมือถือ</span><button data-act="dlg" data-v="install">วิธีติดตั้ง</button><button data-act="install-dismiss" aria-label="ปิด">✕</button>';
 }
 
 /* ---------- map ---------- */
@@ -858,6 +890,28 @@ function contribText() {
     `ผลจริง: ${f.elements.outcome.value}`, `เปิดมาแล้ว: ${f.elements.months.value || '-'} เดือน`, `สถานะ: ${f.elements.status.value}`, `ผลประกอบการ: ${f.elements.perf.value}`, 'ยินยอมให้ใช้ข้อมูลนี้ปรับปรุงสูตร: ใช่'].filter(Boolean).join('\n');
 }
 
+function installDialog() {
+  if (isStandalone()) return '<h3>ติดตั้งเป็นแอพ</h3><p>คุณกำลังใช้งานผ่านแอพที่ติดตั้งไว้แล้ว</p>';
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const inApp = /Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua);
+  const android = /android/i.test(ua);
+  let body;
+  if (ios) {
+    const li = [];
+    if (inApp) li.push('<b>เปิดลิงก์นี้ใน Safari ก่อน</b> (กดปุ่มเมนูมุมจอ แล้วเลือก "เปิดใน Safari") เพราะเบราว์เซอร์ในแอพ LINE ติดตั้งไม่ได้');
+    li.push('กดปุ่ม <b>แชร์</b> (ไอคอนสี่เหลี่ยมมีลูกศรชี้ขึ้น) ที่แถบล่างของ Safari', 'เลื่อนลง แล้วเลือก <b>"เพิ่มลงในหน้าจอโฮม"</b>', 'กด <b>"เพิ่ม"</b> มุมขวาบน');
+    body = `<ol>${li.map((x) => `<li>${x}</li>`).join('')}</ol>`;
+  } else if (android) {
+    body = deferredInstall
+      ? '<p>กดปุ่มด้านล่างแล้วเลือก "ติดตั้ง"</p><div class="dlg-actions"><button class="dlg-primary" data-act="install-go">ติดตั้งแอพ</button></div>'
+      : '<ol><li>กดเมนู <b>⋮</b> มุมขวาบนของ Chrome</li><li>เลือก <b>"ติดตั้งแอป"</b> หรือ <b>"เพิ่มลงในหน้าจอหลัก"</b></li><li>กด <b>"ติดตั้ง"</b></li></ol>';
+  } else {
+    body = '<p>บนคอมพิวเตอร์ กดไอคอนติดตั้งที่ช่องที่อยู่เว็บของ Chrome หรือ Edge (ด้านขวาของช่อง) หรือใช้บนมือถือจะสะดวกกว่า</p>';
+  }
+  return `<h3>ติดตั้งเป็นแอพบนมือถือ</h3><p class="muted small">ได้ไอคอนบนหน้าจอโฮม เปิดเต็มจอเหมือนแอพทั่วไป ไม่ต้องเปิดลิงก์ทุกครั้ง</p>${body}<p class="muted small">ติดตั้งเสร็จ เปิดจากไอคอน "ทำเลดี" บนหน้าจอโฮมได้เลย</p>`;
+}
+
 const DLG = {
   consent: () => `<h3>ขออนุญาตใช้ตำแหน่งปัจจุบันของคุณ</h3><p>เพื่อปักหมุดทำเลตรงตำแหน่งที่คุณยืนอยู่ แอพจะอ่านพิกัดจากอุปกรณ์ของคุณ</p><ul><li>ใช้เพื่อวางหมุดและวิเคราะห์ทำเลรอบตำแหน่งนั้นเท่านั้น</li><li>พิกัดจะถูกส่งจากเบราว์เซอร์ของคุณไปยังบริการแผนที่สาธารณะ (OpenStreetMap, Overpass, Photon) เพื่อค้นหาร้านค้าและที่อยู่</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง ไม่เก็บและไม่ส่งพิกัดของคุณไปที่อื่น</li><li>ถอนความยินยอมได้ทุกเมื่อที่ปุ่ม "ความเป็นส่วนตัว" และยังใช้งานต่อได้ด้วยการปักหมุดเองหรือค้นหาสถานที่</li></ul><div class="dlg-actions"><button class="dlg-ghost" data-act="close">ไม่ยินยอม</button><button class="dlg-primary" data-act="accept">ยินยอมและใช้ตำแหน่ง</button></div>`,
   privacy: () => `<h3>ความเป็นส่วนตัวและข้อมูลส่วนบุคคล</h3><h4>ข้อมูลที่ใช้</h4><ul><li><b>ตำแหน่งปัจจุบัน (GPS)</b> ใช้เมื่อคุณกดปุ่ม "ตำแหน่งปัจจุบัน" และให้ความยินยอมเท่านั้น</li><li><b>ตำแหน่งที่ปักหมุดและคำค้นหา</b> ใช้เพื่อวิเคราะห์ทำเลและค้นหาสถานที่</li><li>แอพไม่ขอชื่อ อีเมล หรือเบอร์โทร และไม่มีการสมัครสมาชิก</li></ul><h4>ผู้ที่ได้รับข้อมูล</h4><ul><li>เบราว์เซอร์ของคุณส่งพิกัดและคำค้นหาตรงไปยัง OpenStreetMap (ภาพแผนที่), Overpass (ข้อมูลร้านค้า) และ Photon (ค้นหาสถานที่และที่อยู่) บริการเหล่านี้เห็นหมายเลข IP ของคุณตามปกติของการเปิดเว็บ</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง จึงไม่เก็บข้อมูลของคุณไว้</li><li>ฟังก์ชัน "ส่งผลจริง" จะส่งข้อมูลให้ทีมงานก็ต่อเมื่อคุณติ๊กยินยอมและกดส่งเองผ่าน LINE (ซึ่งเป็นบริการของบุคคลที่สาม)</li><li>ฟังก์ชัน "คัดลอกคำสั่งถาม AI" ข้อมูลทำเลที่คัดลอกจะไปอยู่กับ AI ที่คุณเลือกวางเอง</li></ul><h4>การเก็บรักษา</h4><ul><li>ผลวิเคราะห์อยู่ในหน้าจอนี้เท่านั้น ปิดหน้าแล้วหายไป</li><li>เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น: การให้ความยินยอมใช้ตำแหน่ง วันเริ่มทดลอง PRO และสิทธิ์ PRO ที่ปลดล็อกแล้ว</li></ul><p class="muted small">สิทธิของคุณ: ถอนความยินยอมได้ทุกเมื่อด้วยปุ่มด้านล่าง</p>${getConsent() ? '<div class="dlg-actions"><button class="dlg-ghost" data-act="withdraw">ถอนความยินยอมใช้ตำแหน่ง</button></div>' : '<p class="muted small">ตอนนี้คุณยังไม่ได้ให้ความยินยอมใช้ตำแหน่งปัจจุบัน</p>'}`,
@@ -868,8 +922,10 @@ const DLG = {
     <h4>PRO (ทดลองฟรี ${CONFIG.TRIAL_DAYS} วัน)</h4><ul><li>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด เทียบ 7 ประเภท</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul>
     <h4>ราคา</h4><p><b>${esc(CONFIG.PRICES)}</b></p>
     ${ENT.kind === 'paid' ? '' : `<p>ชำระเงินแล้ว ทีมงานจะส่งลิงก์ให้ <b>กดครั้งเดียว PRO ก็เปิดใช้ได้ทันที</b> ไม่ต้องกรอกอะไร</p>${CONFIG.LINE_URL ? `<p><a class="dlg-primary" style="display:inline-block;text-decoration:none" href="${esc(CONFIG.LINE_URL)}" target="_blank" rel="noopener">ติดต่อ ${esc(CONFIG.CONTACT)} เพื่อชำระเงิน</a></p>` : `<p>ติดต่อ: <b>${esc(CONFIG.CONTACT)}</b></p>`}`}
+    ${isStandalone() && ENT.kind !== 'paid' ? `<form class="form" data-form="paste" style="margin-top:8px"><label for="pasteIn">เปิดจากไอคอนแอพ: วางลิงก์ปลดล็อกที่ได้รับจากทีมงาน (ลิงก์ที่กดในแชทจะเปิดในเบราว์เซอร์ ไม่ใช่ในแอพ)</label><input class="code-in" id="pasteIn" name="link" type="text" autocomplete="off" placeholder="https://…" spellcheck="false"><p class="err small" id="pasteErr"></p><div class="dlg-actions"><button type="submit" class="dlg-primary">ปลดล็อก</button></div></form>` : ''}
     ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
   contrib: contribForm,
+  install: installDialog,
 };
 function closeDlg() { const d = $('.dlg-bg'); if (d) d.remove(); }
 function openDlg(kind) {
@@ -915,6 +971,8 @@ document.addEventListener('click', (e) => {
     case 'accept': lsSet(LSK.gps, '1'); closeDlg(); runLocate(); break;
     case 'withdraw': lsSet(LSK.gps, null); closeDlg(); toast('ถอนความยินยอมใช้ตำแหน่งแล้ว'); break;
     case 'licclear': lsSet(LSK.lic, null); closeDlg(); initEnt(); toast('ยกเลิกการปลดล็อกบนเครื่องนี้แล้ว'); break;
+    case 'install-dismiss': lsSet(LSK.installDismissed, '1'); renderHeader(); break;
+    case 'install-go': if (deferredInstall) { deferredInstall.prompt(); deferredInstall.userChoice.finally(() => { deferredInstall = null; closeDlg(); }); } break;
     case 'retry': { const p = S.pins[S.active]; if (p) cache.delete(ck(p)); refresh(); break; }
     case 'copy': copyToClipboard(copyText(S.active), 'คัดลอกสรุปแล้ว นำไปวางใน LINE ได้เลย'); break;
     case 'scan': if (!needPro()) runScan(); break;
@@ -941,6 +999,15 @@ document.addEventListener('submit', async (e) => {
     const text = f.elements.c.value.trim();
     if (!text) { toast('พิมพ์ประเภทร้านที่ต้องการก่อน'); return; }
     applyCustom(text); closeDlg(); refresh();
+  } else if (f.dataset.form === 'paste') {
+    // inside the installed app: accept the whole unlock link (or just its code part)
+    const raw = f.elements.link.value.trim();
+    const m = /pro=([A-Za-z0-9._-]+)/.exec(raw);
+    const err = $('#pasteErr');
+    if (!raw) { err.textContent = 'วางลิงก์ที่ได้รับก่อน'; return; }
+    err.textContent = 'กำลังตรวจ…';
+    const r = await activate(m ? m[1] : raw);
+    if (r.ok) { closeDlg(); toast(`ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(r.until)}`); } else err.textContent = r.error;
   }
 });
 window.addEventListener('resize', () => map.invalidateSize());
