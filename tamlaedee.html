@@ -991,7 +991,7 @@ const DLG = {
     <h4>ฟรีตลอด</h4><ul><li>วิเคราะห์ทำเล คะแนน 5 ด้าน คู่แข่ง แหล่งดึงคน เทียบ 3 ทำเล ค้นหา ตำแหน่งปัจจุบัน และคัดลอกสรุปไปวางใน LINE</li></ul>
     <h4>PRO (ทดลองฟรี ${CONFIG.TRIAL_DAYS} วัน)</h4><ul><li>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด เทียบ 7 ประเภท</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul>
     <h4>ราคา</h4><p><b>${esc(CONFIG.PRICES)}</b></p>
-    ${ENT.kind === 'paid' ? '' : payBlock()}
+    ${ENT.kind === 'ended' || ENT.kind === 'expired' ? payBlock() : ENT.kind === 'trial' ? `<p>ตอนนี้ใช้ได้ฟรีเต็มที่ ไม่ต้องทำอะไรเลย ครบ ${ENT.daysLeft} วันแล้วค่อยชำระ</p>` : ''}
     ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
   contrib: contribForm,
   install: installDialog,
