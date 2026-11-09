@@ -207,7 +207,8 @@ h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0}
 @media (max-width:460px){.pay{grid-template-columns:1fr}.qr{justify-self:center}}
 #busy{position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:2500;width:min(92vw,400px);display:flex;gap:14px;align-items:center;background:var(--surface);color:var(--ink);border:2px solid var(--pinA);border-radius:14px;padding:12px 16px;box-shadow:0 8px 28px rgb(0 0 0/.28);pointer-events:none}
 #busy b{font-size:15px}#busy .big{display:block}#busy .big b{font-size:26px;font-variant-numeric:tabular-nums;color:var(--pinA)}#busy small{display:block;color:var(--muted);font-size:12px}
-@media (max-width:900px){#busy{top:auto;bottom:190px;width:auto;max-width:92vw;padding:8px 14px;gap:10px;border-width:2px}#busy b{font-size:13px}#busy .big{display:inline;margin-left:6px}#busy .big b{font-size:20px}#busy small{font-size:11px}#busy .spin{width:22px;height:22px;border-width:3px}}
+@media (max-width:900px){#busy{display:none}}
+.m-card .ring-ph.busy{display:grid;place-items:center;background:none}.m-card .info .elapsed{font-size:18px;font-weight:700;color:var(--pinA);font-variant-numeric:tabular-nums}
 .spin{flex:none;width:30px;height:30px;border-radius:50%;border:4px solid color-mix(in srgb,var(--pinA) 25%,transparent);border-top-color:var(--pinA);animation:tlspin .9s linear infinite}
 @keyframes tlspin{to{transform:rotate(360deg)}}
 .rseg{flex-wrap:wrap;max-width:100%}.m-chips .rseg{flex-wrap:nowrap;overflow-x:auto;max-width:92vw}
@@ -886,7 +887,7 @@ function renderMobile() {
   const b = bizNow(), e = entry(S.active);
   $('#mBiz').innerHTML = `<button class="pick" data-act="dlg" data-v="biz"><span class="muted small">ธุรกิจ</span><b>${esc(b.label)}</b><span class="muted small">เปลี่ยน ▾</span></button><button class="pro-chip ${ENT.active ? 'on' : ''}" data-act="dlg" data-v="license">${esc(entLabel())}</button>`;
   $('#mChips').innerHTML = `<div class="pchips">${PIN_KEYS.map((k) => `<button class="pchip" data-act="pin" data-v="${k}" aria-pressed="${S.active === k}">${pb(k)}<span class="num">${score(k)}</span></button>`).join('')}</div>${radiusSeg()}`;
-  $('#mCard').innerHTML = `${e.state === 'ok' ? ring(e.a.total, 60) : '<div class="ring-ph"></div>'}<div class="info"><b>ทำเล ${S.active}${addr(S.active) ? ' · ' + esc(addr(S.active)) : ''}</b><span class="small muted">${e.state === 'ok' ? `<span class="pill ${verdict(e.a.total).c}">${verdict(e.a.total).th}</span> คู่แข่ง ${e.a.comps.length} แห่ง` : e.state === 'empty' ? 'แตะแผนที่เพื่อปักหมุด' : e.state === 'loading' ? 'กำลังวิเคราะห์…' : esc(e.error)}</span></div>${e.state === 'ok' ? '<button class="go" data-act="mview" data-v="analysis">ดูผล</button>' : ''}`;
+  $('#mCard').innerHTML = `${e.state === 'ok' ? ring(e.a.total, 60) : e.state === 'loading' ? '<div class="ring-ph busy"><span class="spin"></span></div>' : '<div class="ring-ph"></div>'}<div class="info"><b>ทำเล ${S.active}${addr(S.active) ? ' · ' + esc(addr(S.active)) : ''}</b><span class="small muted">${e.state === 'ok' ? `<span class="pill ${verdict(e.a.total).c}">${verdict(e.a.total).th}</span> คู่แข่ง ${e.a.comps.length} แห่ง` : e.state === 'empty' ? 'แตะแผนที่เพื่อปักหมุด' : e.state === 'loading' ? `กำลังวิเคราะห์ รอสักครู่… <b class="elapsed" data-since="${e.since || Date.now()}" data-plain="1">${secs(e.since || Date.now(), true)}</b>` : esc(e.error)}</span></div>${e.state === 'ok' ? '<button class="go" data-act="mview" data-v="analysis">ดูผล</button>' : ''}`;
   const cur = S.mview === 'map' ? 'map' : S.tab;
   $('#mNav').innerHTML = [['map', 'แผนที่'], ['analysis', 'วิเคราะห์'], ['compare', 'เปรียบเทียบ']].map(([k, l]) => `<button data-act="mview" data-v="${k}" aria-pressed="${cur === k}">${NAV_ICONS[k]}${l}</button>`).join('');
 }
