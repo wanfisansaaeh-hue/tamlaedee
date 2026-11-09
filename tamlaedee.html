@@ -244,7 +244,7 @@ const CONFIG = {
   PUBLIC_KEY: /*PUBLIC_KEY*/{"kty":"EC","crv":"P-256","x":"0-1pqcZF_4IAwrk4gTwe8xfY_C3IX9xY5P0TeYyHiSE","y":"WLXbS0fVN2yioXHbeilr8ipv-T885iHfojMjP7eRt3U"}/*END_PUBLIC_KEY*/,
   CONTACT: /*CONTACT*/'LINE @097wgyfr'/*END_CONTACT*/,
   LINE_URL: /*LINE_URL*/'https://line.me/R/ti/p/@097wgyfr'/*END_LINE_URL*/,
-  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ฟรี 7 วัน · สั่งซื้อและรับรหัสทาง LINE'/*END_PRICES*/,
+  PRICES: /*PRICES*/'PRO รายเดือน 690 บาท · ทดลองใช้ฟรี 7 วัน · สั่งซื้อทาง LINE'/*END_PRICES*/,
   TRIAL_DAYS: 7,
   REWARD: true, // thank contributors of real outcomes with extra PRO days
 };
@@ -303,10 +303,10 @@ async function initEnt() {
 async function activate(raw) {
   const code = raw.replace(/\s+/g, '');
   if (!CONFIG.PUBLIC_KEY) return { ok: false, error: 'แอพนี้ยังไม่ได้ผูกกุญแจเจ้าของ ให้ใช้ไฟล์แอพที่สร้างจากหน้าแอดมิน' };
-  if (!(self.crypto && crypto.subtle)) return { ok: false, error: 'เบราว์เซอร์นี้ตรวจรหัสไม่ได้ ลองใช้ Chrome หรือ Edge รุ่นใหม่ และเปิดผ่านลิงก์ https' };
+  if (!(self.crypto && crypto.subtle)) return { ok: false, error: 'เบราว์เซอร์นี้ปลดล็อกไม่ได้ ลองใช้ Chrome หรือ Edge รุ่นใหม่' };
   const lic = await verifyLicense(code);
-  if (!lic) return { ok: false, error: 'รหัสไม่ถูกต้อง ตรวจว่าคัดลอกครบทั้งบรรทัด' };
-  if (Date.now() > lic.expMs) return { ok: false, error: `รหัสนี้หมดอายุเมื่อ ${fmtDate(lic.expMs)}` };
+  if (!lic) return { ok: false, error: 'ลิงก์ปลดล็อกไม่สมบูรณ์ ลองกดลิงก์อีกครั้งหรือขอลิงก์ใหม่จากทีมงาน' };
+  if (Date.now() > lic.expMs) return { ok: false, error: `ลิงก์นี้หมดอายุเมื่อ ${fmtDate(lic.expMs)} ขอลิงก์ใหม่จากทีมงาน` };
   lsSet(LSK.lic, code);
   await initEnt();
   return { ok: true, until: lic.expMs };
@@ -328,7 +328,7 @@ function entBanner() {
   if (ENT.kind === 'paid') return `<div class="ent"><span><span class="badge">PRO</span> ใช้งานได้ถึง ${fmtDate(ENT.until)}</span><button data-act="dlg" data-v="license">จัดการ</button></div>`;
   if (ENT.kind === 'trial') return `<div class="ent"><span><span class="badge">PRO</span> ทดลองใช้ฟรีเหลือ ${ENT.daysLeft} วัน · ฟังก์ชันพื้นฐานใช้ฟรีตลอด</span><button data-act="dlg" data-v="license">รายละเอียด</button></div>`;
   if (ENT.kind === 'loading') return '';
-  return `<div class="ent warn"><span>${ENT.kind === 'expired' ? 'รหัส PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO'} · ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</span><button data-act="dlg" data-v="license">ปลดล็อก PRO</button></div>`;
+  return `<div class="ent warn"><span>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO'} · ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</span><button data-act="dlg" data-v="license">ปลดล็อก PRO</button></div>`;
 }
 
 /* ---------- business types ---------- */
@@ -833,7 +833,7 @@ function goto(i) {
 }
 
 /* ---------- dialogs ---------- */
-const licenseStatus = () => (ENT.kind === 'paid' ? `<p><span class="badge">PRO</span> ใช้งานได้ถึง <b>${fmtDate(ENT.until)}</b></p>` : ENT.kind === 'trial' ? `<p>ทดลองใช้ PRO ฟรีเหลือ <b>${ENT.daysLeft} วัน</b> หลังจากนั้นฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>` : `<p>${ENT.kind === 'expired' ? 'รหัส PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO แล้ว'} ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>`);
+const licenseStatus = () => (ENT.kind === 'paid' ? `<p><span class="badge">PRO</span> ใช้งานได้ถึง <b>${fmtDate(ENT.until)}</b></p>` : ENT.kind === 'trial' ? `<p>ทดลองใช้ PRO ฟรีเหลือ <b>${ENT.daysLeft} วัน</b> หลังจากนั้นฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>` : `<p>${ENT.kind === 'expired' ? 'PRO หมดอายุแล้ว' : 'หมดช่วงทดลอง PRO แล้ว'} ฟังก์ชันพื้นฐานยังใช้ฟรีตลอด</p>`);
 function contribForm() {
   const pins = PIN_KEYS.filter((k) => S.pins[k]);
   if (!pins.length) return '<h3>ส่งผลจริงช่วยปรับปรุงสูตร</h3><p>ปักหมุดทำเลก่อน แล้วกลับมาส่งผลจริงของทำเลนั้น</p>';
@@ -846,7 +846,7 @@ function contribForm() {
   <label>ผลประกอบการเทียบที่คาดไว้<select name="perf"><option>ต่ำกว่าที่คาด</option><option>ตามที่คาด</option><option>สูงกว่าที่คาด</option><option>ไม่ระบุ</option></select></label>
   <label class="check"><input type="checkbox" name="consent"><span>ฉันยินยอมให้ส่งข้อมูลนี้ (ตำแหน่งแบบหยาบประมาณ 100 ม. ประเภทร้าน คะแนนที่แอพให้ และผลจริงด้านบน ไม่มีชื่อหรือเบอร์โทร) ให้ทีมงานเพื่อปรับปรุงสูตรคะแนน</span></label>
   <div class="dlg-actions"><button type="button" class="dlg-ghost" data-act="contrib-copy">คัดลอกข้อความ</button><button type="button" class="dlg-primary" data-act="contrib-send">ส่งทาง LINE</button></div></form>
-  ${CONFIG.REWARD ? '<p class="muted small">เป็นการขอบคุณ ทีมงานจะส่งรหัสใช้ PRO ฟรีเพิ่มให้ทาง LINE</p>' : ''}`;
+  ${CONFIG.REWARD ? '<p class="muted small">เป็นการขอบคุณ ทีมงานจะส่งลิงก์ใช้ PRO ฟรีเพิ่มให้ทาง LINE</p>' : ''}`;
 }
 function contribText() {
   const f = $('.dlg form[data-form="contrib"]');
@@ -860,15 +860,15 @@ function contribText() {
 
 const DLG = {
   consent: () => `<h3>ขออนุญาตใช้ตำแหน่งปัจจุบันของคุณ</h3><p>เพื่อปักหมุดทำเลตรงตำแหน่งที่คุณยืนอยู่ แอพจะอ่านพิกัดจากอุปกรณ์ของคุณ</p><ul><li>ใช้เพื่อวางหมุดและวิเคราะห์ทำเลรอบตำแหน่งนั้นเท่านั้น</li><li>พิกัดจะถูกส่งจากเบราว์เซอร์ของคุณไปยังบริการแผนที่สาธารณะ (OpenStreetMap, Overpass, Photon) เพื่อค้นหาร้านค้าและที่อยู่</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง ไม่เก็บและไม่ส่งพิกัดของคุณไปที่อื่น</li><li>ถอนความยินยอมได้ทุกเมื่อที่ปุ่ม "ความเป็นส่วนตัว" และยังใช้งานต่อได้ด้วยการปักหมุดเองหรือค้นหาสถานที่</li></ul><div class="dlg-actions"><button class="dlg-ghost" data-act="close">ไม่ยินยอม</button><button class="dlg-primary" data-act="accept">ยินยอมและใช้ตำแหน่ง</button></div>`,
-  privacy: () => `<h3>ความเป็นส่วนตัวและข้อมูลส่วนบุคคล</h3><h4>ข้อมูลที่ใช้</h4><ul><li><b>ตำแหน่งปัจจุบัน (GPS)</b> ใช้เมื่อคุณกดปุ่ม "ตำแหน่งปัจจุบัน" และให้ความยินยอมเท่านั้น</li><li><b>ตำแหน่งที่ปักหมุดและคำค้นหา</b> ใช้เพื่อวิเคราะห์ทำเลและค้นหาสถานที่</li><li>แอพไม่ขอชื่อ อีเมล หรือเบอร์โทร และไม่มีการสมัครสมาชิก</li></ul><h4>ผู้ที่ได้รับข้อมูล</h4><ul><li>เบราว์เซอร์ของคุณส่งพิกัดและคำค้นหาตรงไปยัง OpenStreetMap (ภาพแผนที่), Overpass (ข้อมูลร้านค้า) และ Photon (ค้นหาสถานที่และที่อยู่) บริการเหล่านี้เห็นหมายเลข IP ของคุณตามปกติของการเปิดเว็บ</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง จึงไม่เก็บข้อมูลของคุณไว้</li><li>ฟังก์ชัน "ส่งผลจริง" จะส่งข้อมูลให้ทีมงานก็ต่อเมื่อคุณติ๊กยินยอมและกดส่งเองผ่าน LINE (ซึ่งเป็นบริการของบุคคลที่สาม)</li><li>ฟังก์ชัน "คัดลอกคำสั่งถาม AI" ข้อมูลทำเลที่คัดลอกจะไปอยู่กับ AI ที่คุณเลือกวางเอง</li></ul><h4>การเก็บรักษา</h4><ul><li>ผลวิเคราะห์อยู่ในหน้าจอนี้เท่านั้น ปิดหน้าแล้วหายไป</li><li>เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น: การให้ความยินยอมใช้ตำแหน่ง วันเริ่มทดลอง PRO และรหัส PRO ที่คุณใส่</li></ul><p class="muted small">สิทธิของคุณ: ถอนความยินยอมได้ทุกเมื่อด้วยปุ่มด้านล่าง</p>${getConsent() ? '<div class="dlg-actions"><button class="dlg-ghost" data-act="withdraw">ถอนความยินยอมใช้ตำแหน่ง</button></div>' : '<p class="muted small">ตอนนี้คุณยังไม่ได้ให้ความยินยอมใช้ตำแหน่งปัจจุบัน</p>'}`,
+  privacy: () => `<h3>ความเป็นส่วนตัวและข้อมูลส่วนบุคคล</h3><h4>ข้อมูลที่ใช้</h4><ul><li><b>ตำแหน่งปัจจุบัน (GPS)</b> ใช้เมื่อคุณกดปุ่ม "ตำแหน่งปัจจุบัน" และให้ความยินยอมเท่านั้น</li><li><b>ตำแหน่งที่ปักหมุดและคำค้นหา</b> ใช้เพื่อวิเคราะห์ทำเลและค้นหาสถานที่</li><li>แอพไม่ขอชื่อ อีเมล หรือเบอร์โทร และไม่มีการสมัครสมาชิก</li></ul><h4>ผู้ที่ได้รับข้อมูล</h4><ul><li>เบราว์เซอร์ของคุณส่งพิกัดและคำค้นหาตรงไปยัง OpenStreetMap (ภาพแผนที่), Overpass (ข้อมูลร้านค้า) และ Photon (ค้นหาสถานที่และที่อยู่) บริการเหล่านี้เห็นหมายเลข IP ของคุณตามปกติของการเปิดเว็บ</li><li>แอพนี้ไม่มีเซิร์ฟเวอร์ของตัวเอง จึงไม่เก็บข้อมูลของคุณไว้</li><li>ฟังก์ชัน "ส่งผลจริง" จะส่งข้อมูลให้ทีมงานก็ต่อเมื่อคุณติ๊กยินยอมและกดส่งเองผ่าน LINE (ซึ่งเป็นบริการของบุคคลที่สาม)</li><li>ฟังก์ชัน "คัดลอกคำสั่งถาม AI" ข้อมูลทำเลที่คัดลอกจะไปอยู่กับ AI ที่คุณเลือกวางเอง</li></ul><h4>การเก็บรักษา</h4><ul><li>ผลวิเคราะห์อยู่ในหน้าจอนี้เท่านั้น ปิดหน้าแล้วหายไป</li><li>เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น: การให้ความยินยอมใช้ตำแหน่ง วันเริ่มทดลอง PRO และสิทธิ์ PRO ที่ปลดล็อกแล้ว</li></ul><p class="muted small">สิทธิของคุณ: ถอนความยินยอมได้ทุกเมื่อด้วยปุ่มด้านล่าง</p>${getConsent() ? '<div class="dlg-actions"><button class="dlg-ghost" data-act="withdraw">ถอนความยินยอมใช้ตำแหน่ง</button></div>' : '<p class="muted small">ตอนนี้คุณยังไม่ได้ให้ความยินยอมใช้ตำแหน่งปัจจุบัน</p>'}`,
   method: () => `<h3>วิธีคิดคะแนนและข้อจำกัด</h3><h4>คะแนนรวม 0–100 มาจาก 5 ด้าน</h4><ul>${FACTORS.map((F) => `<li><b>${F.label}</b> น้ำหนัก ${Math.round(WEIGHTS[F.k] * 100)}% · ${F.hint}</li>`).join('')}</ul><p>แต่ละด้านคิดเป็น 0–100 แล้วถ่วงน้ำหนักรวมกัน ด้านที่ไม่มีข้อมูลจะถูกตัดออก และน้ำหนักของด้านที่เหลือจะปรับให้รวมเป็น 100%</p><h4>แหล่งข้อมูล</h4><p>ร้านค้า สถานที่ และสถานีรถไฟฟ้า มาจาก OpenStreetMap ซึ่งอาสาสมัครช่วยกันบันทึก บางพื้นที่จึงมีร้านไม่ครบหรือข้อมูลไม่ทันสมัย</p><h4>ข้อจำกัดที่ควรรู้</h4><ul><li>ยังไม่มีเรตติ้งและรีวิวของลูกค้า จึงยังคำนวณด้าน "ช่องว่างคุณภาพ" ไม่ได้</li><li>ไม่รวมค่าเช่า ปริมาณคนเดินผ่านจริง ที่จอดรถ ทิศทางการจราจร กำลังซื้อ และกฎผังเมือง</li><li>สูตรเป็นแบบจำลองเบื้องต้น ยังไม่ได้ทดสอบเทียบกับผลประกอบการของร้านจริง</li><li>คะแนนสูงไม่ได้รับประกันว่าธุรกิจจะประสบความสำเร็จ และคะแนนต่ำไม่ได้แปลว่าไม่ควรเปิด</li></ul><p>ใช้ผลนี้เป็นจุดตั้งต้นในการเลือกทำเล แล้วไปสำรวจพื้นที่จริงทั้งวันธรรมดาและวันหยุดก่อนตัดสินใจ</p>`,
   biz: () => `<h3>เลือกประเภทธุรกิจ</h3>${bizPicker()}`,
   license: () => `<h3>ฟังก์ชันเชิงลึก <span class="badge">PRO</span></h3>${licenseStatus()}
     <h4>ฟรีตลอด</h4><ul><li>วิเคราะห์ทำเล คะแนน 5 ด้าน คู่แข่ง แหล่งดึงคน เทียบ 3 ทำเล ค้นหา ตำแหน่งปัจจุบัน และคัดลอกสรุปไปวางใน LINE</li></ul>
     <h4>PRO (ทดลองฟรี ${CONFIG.TRIAL_DAYS} วัน)</h4><ul><li>ธุรกิจที่เหมาะกับทำเลนี้ที่สุด เทียบ 7 ประเภท</li><li>สแกนหาจุดที่ดีกว่าในละแวก 1 กม. พร้อมแผนที่สี</li><li>รายงานฉบับเต็ม พิมพ์หรือบันทึกเป็น PDF</li><li>ชุดคำสั่งสำหรับถาม AI พร้อมข้อมูลทำเล</li></ul>
     <h4>ราคา</h4><p><b>${esc(CONFIG.PRICES)}</b></p>
-    ${ENT.kind === 'paid' ? '' : `<p>ชำระเงินแล้ว ทีมงานจะส่งลิงก์ให้ <b>กดครั้งเดียว PRO ก็เปิดใช้ได้ทันที</b> ไม่ต้องกรอกรหัสอะไร</p>${CONFIG.LINE_URL ? `<p><a class="dlg-primary" style="display:inline-block;text-decoration:none" href="${esc(CONFIG.LINE_URL)}" target="_blank" rel="noopener">ติดต่อ ${esc(CONFIG.CONTACT)} เพื่อชำระเงิน</a></p>` : `<p>ติดต่อ: <b>${esc(CONFIG.CONTACT)}</b></p>`}`}
-    <details><summary class="small muted" style="cursor:pointer">มีรหัสปลดล็อกอยู่แล้ว?</summary><form class="form" data-form="license" style="margin-top:8px"><label for="licIn">วางรหัส PRO ที่ได้รับ</label><input class="code-in" id="licIn" name="code" type="text" autocomplete="off" placeholder="TL1.…" spellcheck="false"><p class="err small" id="licErr"></p><div class="dlg-actions">${lsGet(LSK.lic) ? '<button type="button" class="dlg-ghost" data-act="licclear">ลบรหัสออกจากเครื่องนี้</button>' : ''}<button type="submit" class="dlg-primary">ใช้รหัส</button></div></form></details>`,
+    ${ENT.kind === 'paid' ? '' : `<p>ชำระเงินแล้ว ทีมงานจะส่งลิงก์ให้ <b>กดครั้งเดียว PRO ก็เปิดใช้ได้ทันที</b> ไม่ต้องกรอกอะไร</p>${CONFIG.LINE_URL ? `<p><a class="dlg-primary" style="display:inline-block;text-decoration:none" href="${esc(CONFIG.LINE_URL)}" target="_blank" rel="noopener">ติดต่อ ${esc(CONFIG.CONTACT)} เพื่อชำระเงิน</a></p>` : `<p>ติดต่อ: <b>${esc(CONFIG.CONTACT)}</b></p>`}`}
+    ${lsGet(LSK.lic) ? '<p><button type="button" class="dlg-ghost" data-act="licclear">ยกเลิกการปลดล็อกบนเครื่องนี้</button></p>' : ''}`,
   contrib: contribForm,
 };
 function closeDlg() { const d = $('.dlg-bg'); if (d) d.remove(); }
@@ -914,7 +914,7 @@ document.addEventListener('click', (e) => {
     case 'close': closeDlg(); break;
     case 'accept': lsSet(LSK.gps, '1'); closeDlg(); runLocate(); break;
     case 'withdraw': lsSet(LSK.gps, null); closeDlg(); toast('ถอนความยินยอมใช้ตำแหน่งแล้ว'); break;
-    case 'licclear': lsSet(LSK.lic, null); closeDlg(); initEnt(); toast('ลบรหัสออกจากเครื่องนี้แล้ว'); break;
+    case 'licclear': lsSet(LSK.lic, null); closeDlg(); initEnt(); toast('ยกเลิกการปลดล็อกบนเครื่องนี้แล้ว'); break;
     case 'retry': { const p = S.pins[S.active]; if (p) cache.delete(ck(p)); refresh(); break; }
     case 'copy': copyToClipboard(copyText(S.active), 'คัดลอกสรุปแล้ว นำไปวางใน LINE ได้เลย'); break;
     case 'scan': if (!needPro()) runScan(); break;
@@ -941,13 +941,6 @@ document.addEventListener('submit', async (e) => {
     const text = f.elements.c.value.trim();
     if (!text) { toast('พิมพ์ประเภทร้านที่ต้องการก่อน'); return; }
     applyCustom(text); closeDlg(); refresh();
-  } else if (f.dataset.form === 'license') {
-    const code = f.elements.code.value.trim();
-    const err = $('#licErr');
-    if (!code) { err.textContent = 'วางรหัสที่ได้รับก่อน'; return; }
-    err.textContent = 'กำลังตรวจรหัส…';
-    const r = await activate(code);
-    if (r.ok) { closeDlg(); toast(`ปลดล็อก PRO แล้ว ใช้ได้ถึง ${fmtDate(r.until)}`); } else err.textContent = r.error;
   }
 });
 window.addEventListener('resize', () => map.invalidateSize());

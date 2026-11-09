@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ทำเลดี</title>
 <meta http-equiv="refresh" content="0;url=tamlaedee.html">
-<script>location.replace('tamlaedee.html' + location.search + location.hash);</script>
+<script>
+// the changing ?v= makes phones fetch the newest app instead of an old cached copy (new value every 5 minutes)
+location.replace('tamlaedee.html?v=' + Math.floor(Date.now() / 300000) + location.hash);
+</script>
 </head>
 <body><a href="tamlaedee.html">เปิดทำเลดี</a></body>
 </html>
